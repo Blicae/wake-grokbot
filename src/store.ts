@@ -1,6 +1,7 @@
 /** Inbox layout, receipts and the wake outbox. All writes are atomic; state changes run under one lock. */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { mask } from "./secrets.js";
 import type { Envelope, Status } from "./envelope.js";
 import { atomicWrite, readJson, withLock } from "./fsutil.js";
 
@@ -122,10 +123,12 @@ export class Store {
     return (o.targets[name] ??= { inflight: null, queue: [], attempts: 0, next_at: null, dead: [] });
   }
 
-  log(line: string): void {
+  /** Append one JSON line to `<state>/wake.log`: `{"at","event",...fields}`, masked. */
+  log(event: string, fields: Record<string, unknown> = {}): void {
     try {
       fs.mkdirSync(this.state, { recursive: true });
-      fs.appendFileSync(path.join(this.state, "wake.log"), `${new Date().toISOString()} ${line}\n`);
+      const line = mask(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
+      fs.appendFileSync(path.join(this.state, "wake.log"), line + "\n");
     } catch {
       /* logging never breaks a command */
     }

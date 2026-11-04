@@ -166,7 +166,7 @@ export class Engine {
         if (ts.inflight) {
           const age = now - Date.parse(ts.inflight.at);
           if ((ts.inflight.sending && age > timeoutMs * 3) || (!ts.inflight.sending && age > ttlMs)) {
-            this.store.log(`${name}: in-flight wake expired (${ts.inflight.ids.join(",")})`);
+            this.store.log("inflight_expired", { target: name, ids: ts.inflight.ids });
             if (ts.inflight.sending) this.setWake(ts.inflight.ids, "unknown", name, "wake process died; outcome unknown", ["queued", "coalesced"]);
             ts.inflight = null;
           }
@@ -252,7 +252,7 @@ export class Engine {
         }
         this.store.saveOutbox(ob);
       });
-      this.store.log(`${name}: wake ${outcome.state} for ${pick.join(",")}: ${outcome.detail}`);
+      this.store.log("wake", { target: name, state: outcome.state, ids: pick, detail: outcome.detail });
       events.push({ target: name, state: outcome.state, detail: outcome.detail });
     }
     return events;
@@ -371,6 +371,65 @@ export class Engine {
     for (const t of new Set([...freed, ...(target ? [target] : [])])) await this.pump(t);
     if (target && code === EXIT.OK) code = codeFor(this.store.readReceipt(reply.id)!.wake.state);
     return { code, receipt: this.store.readReceipt(id) ?? this.store.readReceipt(reply.id)!, message: msg, replyId: reply.id };
+  }
+
+  /**
+   * The woken run is finished (like a relay's `/done`): free the in-flight slot of the target(s) and send
+   * whatever queued meanwhile as one wake. An `unknown` wake that a run reports on evidently started.
+   */
+  async release(target?: string): Promise<string[]> {
+    if (target && !this.cfg.targets[target]) throw rule(`unknown target ${target}`);
+    const freed = this.store.lock(() => {
+      const ob = this.store.loadOutbox();
+      const out: string[] = [];
+      for (const [name, ts] of Object.entries(ob.targets)) {
+        if (target && name !== target) continue;
+        if (!ts.inflight) continue;
+        this.setWake(ts.inflight.ids, "started", name, "confirmed: the run reported it finished", ["unknown"]);
+        ts.inflight = null;
+        out.push(name);
+      }
+      this.store.saveOutbox(ob);
+      return out;
+    });
+    for (const t of freed) {
+      this.store.log("released", { target: t });
+      await this.pump(t);
+    }
+    return freed;
+  }
+
+  /** Retention: list (or with apply, delete) read messages and their receipts older than `days`, once settled. */
+  prune(days: number, apply: boolean): { files: string[] } {
+    const cutoff = this.now() - days * 86_400_000;
+    const files: string[] = [];
+    return this.store.lock(() => {
+      for (const side of ["to-worker", "to-dispatcher"]) {
+        const dir = path.join(this.store.inbox, "msg", side, "read");
+        if (!fs.existsSync(dir)) continue;
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith(".json")) continue;
+          const p = path.join(dir, f);
+          if (fs.statSync(p).mtimeMs >= cutoff) continue;
+          const id = f.slice(0, -5);
+          const r = this.store.readReceipt(id);
+          const settled = !r || r.type === "note" || r.type === "answer" || r.type === "receipt" || isTerminal(r.status as Status);
+          if (!settled) continue;
+          files.push(p);
+          const rp = this.store.receiptPath(id);
+          if (fs.existsSync(rp)) files.push(rp);
+        }
+      }
+      const rdir = path.join(this.store.inbox, "replies");
+      if (fs.existsSync(rdir))
+        for (const f of fs.readdirSync(rdir)) {
+          const p = path.join(rdir, f);
+          if (fs.statSync(p).isFile() && fs.statSync(p).mtimeMs < cutoff) files.push(p);
+        }
+      if (apply) for (const f of files) fs.rmSync(f, { force: true });
+      if (apply && files.length) this.store.log("pruned", { count: files.length, days });
+      return { files: files.map((f) => path.relative(this.store.inbox, f).split(path.sep).join("/")) };
+    });
   }
 
   /** Manual reconciliation of an `unknown` wake: started (leave it) or not_started (queue it again). */

@@ -28,6 +28,8 @@ export interface ChannelContext {
 export interface Channel {
   /** Validate the target config; throw ChannelConfigError (message without secrets). */
   check(ctx: ChannelContext): void;
+  /** Optional: what a wake would send, with no URL and no key (for `doctor --dry-run`). */
+  preview?(payload: WakePayload): unknown;
   describe(): string;
   wake(p: WakePayload, ctx: ChannelContext): Promise<WakeOutcome>;
 }

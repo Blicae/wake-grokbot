@@ -20,6 +20,9 @@ export interface TargetConfig {
   payload_key?: string;
   template?: string;
   per_routine_hourly_cap?: number;
+  /** Agent-card style notes: what this target is and what it can do (shown by doctor; never secrets). */
+  description?: string;
+  capabilities?: string[];
   /** script: argv of the wake command; the wake summary is passed as JSON on stdin */
   argv?: string[];
   [k: string]: unknown;

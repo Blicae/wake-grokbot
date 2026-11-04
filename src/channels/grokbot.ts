@@ -56,6 +56,15 @@ export class GrokBotChannel implements Channel {
     return tpl.replace(/\{(\w+)\}/g, (m, k: string) => vals[k] ?? m);
   }
 
+  preview(p: WakePayload): unknown {
+    return {
+      method: "POST",
+      url: "<hidden>",
+      headers: { authorization: "Bearer ***", "content-type": "application/json" },
+      body: { [String(this.cfg.payload_key || "text")]: this.text(p), wake: p },
+    };
+  }
+
   async wake(p: WakePayload, ctx: ChannelContext): Promise<WakeOutcome> {
     const url = this.url(ctx);
     registerSecret(url);

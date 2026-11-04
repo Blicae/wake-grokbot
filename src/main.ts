@@ -31,7 +31,8 @@ Usage: ${PROG} <command> [options]
 Commands:
   send --json [file|-]        accept a wake-envelope/1 from a file or stdin, then wake the other side
   send --to <role> --title <t> [--objective <o>] [--body-file <f>] [--acceptance <a>]...
-                              build a task envelope from flags (prints the new id)
+                              build an envelope from flags (prints the id); --type note, --to dispatcher,
+                              --id <uuid>, --thread <uuid>
   ingest --from <name> <file|->  accept an envelope from a configured external source
   status [<id>] [--json] [--mark-wake started|not_started]
                               show a receipt (or the outbox); reconcile an unknown wake by hand
@@ -39,9 +40,12 @@ Commands:
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
+  release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
+  prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
   init [--print-config] [--force]         write an example config and create the inbox
   guide                       Chinese walkthrough
-  doctor                      check config, inbox, channels and kill switch (no secrets printed)
+  doctor [--dry-run]          check config, inbox, channels and kill switch (no secrets printed);
+                              --dry-run also shows the exact wake request, URL and key hidden, sends nothing
 
 Global options:
   --config <file>   config file (default: ${PROG}.json in the user config folder, or $${ENV.CONFIG})
@@ -76,6 +80,12 @@ const OPTIONS = {
   next: { type: "string" },
   "mark-wake": { type: "string" },
   "no-wake": { type: "boolean" },
+  id: { type: "string" },
+  thread: { type: "string" },
+  target: { type: "string" },
+  days: { type: "string" },
+  apply: { type: "boolean" },
+  "dry-run": { type: "boolean" },
   once: { type: "boolean" },
   interval: { type: "string" },
   "print-config": { type: "boolean" },
@@ -155,7 +165,8 @@ async function run(argv: string[], io: Io): Promise<number> {
         const body = o["body-file"] ? await readInput(io, o["body-file"]) : undefined;
         env = {
           v: VERSION,
-          id: randomUUID(),
+          id: o.id ?? randomUUID(),
+          ...(o.thread ? { thread: o.thread } : {}),
           type: o.type ?? "task",
           from: o.from ?? (o.to === "worker" ? "dispatcher" : "worker"),
           to: o.to,
@@ -235,8 +246,22 @@ async function run(argv: string[], io: Io): Promise<number> {
         await new Promise((r) => setTimeout(r, interval * 1000));
       }
     }
+    case "release": {
+      const freed = await eng.release(o.target ?? pos[0]);
+      if (o.json) io.out(JSON.stringify({ released: freed }) + "\n");
+      else io.out(freed.length ? `released: ${freed.join(", ")}\n` : "nothing in flight\n");
+      return 0;
+    }
+    case "prune": {
+      const days = Number(o.days ?? 30);
+      if (!Number.isFinite(days) || days < 1) throw usage("--days must be >= 1");
+      const r = eng.prune(days, !!o.apply);
+      if (o.json) io.out(JSON.stringify({ applied: !!o.apply, ...r }, null, 2) + "\n");
+      else io.out(`${o.apply ? "deleted" : "would delete (add --apply)"}: ${r.files.length} file(s)\n` + r.files.map((f) => `  ${f}\n`).join(""));
+      return 0;
+    }
     case "doctor":
-      return doctor(eng, loaded.path, io, stdinKey);
+      return doctor(eng, loaded.path, io, stdinKey, !!o["dry-run"]);
     default:
       throw usage(`unknown command ${cmd}; see ${PROG} --help`);
   }
@@ -266,7 +291,7 @@ function init(o: { config?: string; inbox?: string; "print-config"?: boolean; fo
   return 0;
 }
 
-async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: string): Promise<number> {
+async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: string, dryRun = false): Promise<number> {
   let bad = 0;
   const say = (ok: boolean | "warn", m: string) => {
     if (ok === false) bad++;
@@ -292,7 +317,11 @@ async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: st
     try {
       const ch = makeChannel(name, t);
       ch.check({ env: io.env, timeoutMs: 1000, stdinKey });
-      say(true, `target ${name}: ${ch.describe()}`);
+      say(true, `target ${name}: ${ch.describe()}${t.description ? ` - ${t.description}` : ""}${t.capabilities?.length ? ` [${t.capabilities.join(", ")}]` : ""}`);
+      if (dryRun && ch.preview) {
+        const sample = { id: "00000000-0000-4000-8000-000000000000", type: "task" as const, summary: "doctor dry run", inbox_path: eng.store.msgDir("worker"), ids: ["00000000-0000-4000-8000-000000000000"], count: 1 };
+        io.out(`     would send (nothing sent): ${mask(JSON.stringify(ch.preview(sample)))}\n`);
+      }
     } catch (e) {
       say(false, `target ${name}: ${mask((e as Error).message)}`);
     }
