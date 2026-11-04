@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type ChannelContext, makeChannel, type WakePayload } from "./channels/index.js";
-import { HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
+import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
 import { contentHash, type Envelope, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
 import { atomicCreate, renameRetry } from "./fsutil.js";
@@ -150,7 +150,7 @@ export class Engine {
   }
 
   /** Deliver queued wakes: one in-flight wake per target; everything queued meanwhile rides on the next one. */
-  async pump(only?: string): Promise<{ target: string; state: string; detail: string }[]> {
+  async pump(only?: string, opts: { ignoreBackoff?: boolean } = {}): Promise<{ target: string; state: string; detail: string }[]> {
     const events: { target: string; state: string; detail: string }[] = [];
     const names = only ? [only] : Object.keys(this.cfg.targets);
     for (const name of names) {
@@ -176,7 +176,7 @@ export class Engine {
         if (!ts.queue.length) skip = null;
         else if (off) skip = { state: "disabled", detail: `kill switch: ${off}` };
         else if (ts.inflight) skip = { state: "coalesced", detail: "a wake is already in flight; this item rides on the next wake" };
-        else if (ts.next_at && Date.parse(ts.next_at) > now) skip = { state: "not_started", detail: `backing off until ${ts.next_at}` };
+        else if (!opts.ignoreBackoff && ts.next_at && Date.parse(ts.next_at) > now) skip = { state: "not_started", detail: `backing off until ${ts.next_at}` };
         else {
           const hour = now - 3600_000;
           const recent = ob.sent.filter((s) => Date.parse(s.at) >= hour);
@@ -374,12 +374,15 @@ export class Engine {
   }
 
   /**
-   * The woken run is finished (like a relay's `/done`): free the in-flight slot of the target(s) and send
-   * whatever queued meanwhile as one wake. An `unknown` wake that a run reports on evidently started.
+   * The woken run is finished (like a relay's `/done`): free the in-flight slot of the target(s), then deliver
+   * whatever is queued as one wake (also when nothing was in flight). A manual release skips the backoff wait,
+   * so a wake that failed with not_started (e.g. a missing key) is retried right away.
+   * An `unknown` wake that a run reports on evidently started.
    */
-  async release(target?: string): Promise<string[]> {
-    if (target && !this.cfg.targets[target]) throw rule(`unknown target ${target}`);
-    const freed = this.store.lock(() => {
+  async release(target?: string): Promise<{ released: string[]; events: { target: string; state: string; detail: string }[] }> {
+    if (target && !this.cfg.targets[target])
+      throw rule(`unknown target ${target} (known: ${Object.keys(this.cfg.targets).join(", ") || "none"}; ${configInfo(this.loaded)})`);
+    const released = this.store.lock(() => {
       const ob = this.store.loadOutbox();
       const out: string[] = [];
       for (const [name, ts] of Object.entries(ob.targets)) {
@@ -392,11 +395,9 @@ export class Engine {
       this.store.saveOutbox(ob);
       return out;
     });
-    for (const t of freed) {
-      this.store.log("released", { target: t });
-      await this.pump(t);
-    }
-    return freed;
+    for (const t of released) this.store.log("released", { target: t });
+    const events = await this.pump(target, { ignoreBackoff: true });
+    return { released, events };
   }
 
   /** Retention: list (or with apply, delete) read messages and their receipts older than `days`, once settled. */

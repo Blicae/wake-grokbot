@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { makeChannel } from "./channels/index.js";
-import { EXAMPLE_CONFIG, loadConfig } from "./config.js";
+import { configInfo, EXAMPLE_CONFIG, loadConfig } from "./config.js";
 import { Engine } from "./core.js";
 import { type Envelope, type Status, STATUSES, VERSION } from "./envelope.js";
 import { CliError, EXIT, usage } from "./errors.js";
@@ -48,7 +48,8 @@ Commands:
                               --dry-run also shows the exact wake request, URL and key hidden, sends nothing
 
 Global options:
-  --config <file>   config file (default: ${PROG}.json in the user config folder, or $${ENV.CONFIG})
+  --config <file>   config file. Search order: --config, $${ENV.CONFIG}, ./${PROG}.json (current folder),
+                    then ${PROG}.json in the user config folder
   --inbox <dir>     inbox folder (or $${ENV.INBOX})
   --key-stdin       read the wake key from stdin (never pass keys as arguments)
   --json            machine-readable output
@@ -185,7 +186,7 @@ async function run(argv: string[], io: Io): Promise<number> {
     case "ingest": {
       if (!o.from) throw usage("ingest needs --from <source name>");
       const src = eng.cfg.sources[o.from];
-      if (!src) throw usage(`unknown source ${o.from}; add it under "sources" in the config`);
+      if (!src) throw usage(`unknown source ${o.from}; add it under "sources" in the config (${configInfo(loaded)})`);
       const env = parseJson(await readInput(io, pos[0]), "envelope") as Envelope;
       if (env && typeof env === "object" && env.from !== o.from) throw new CliError(`envelope.from must be ${o.from}`, EXIT.RULE);
       return print(await eng.accept(env, { ingestedFrom: o.from, requireSig: !!src.require_sig, noWake: o["no-wake"] }));
@@ -247,10 +248,15 @@ async function run(argv: string[], io: Io): Promise<number> {
       }
     }
     case "release": {
-      const freed = await eng.release(o.target ?? pos[0]);
-      if (o.json) io.out(JSON.stringify({ released: freed }) + "\n");
-      else io.out(freed.length ? `released: ${freed.join(", ")}\n` : "nothing in flight\n");
-      return 0;
+      const r = await eng.release(o.target ?? pos[0]);
+      if (o.json) io.out(JSON.stringify(r, null, 2) + "\n");
+      else {
+        io.out(r.released.length ? `released: ${r.released.join(", ")}\n` : "nothing was in flight\n");
+        if (!r.events.length) io.out("nothing queued to deliver\n");
+        for (const e of r.events) io.out(`${e.target}: wake ${e.state} (${e.detail})\n`);
+      }
+      const states = r.events.map((e) => e.state);
+      return states.includes("unknown") ? EXIT.UNKNOWN : states.some((x) => x !== "started" && x !== "coalesced") ? EXIT.NOT_WOKEN : 0;
     }
     case "prune": {
       const days = Number(o.days ?? 30);
@@ -299,7 +305,7 @@ async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: st
   };
   const major = Number(process.versions.node.split(".")[0]);
   say(major >= 22, `node ${process.versions.node} (need >= 22)`);
-  say(cfgPath ? true : "warn", cfgPath ? `config ${cfgPath}` : "no config file; using defaults (run init)");
+  say(cfgPath ? true : "warn", cfgPath ? `config ${cfgPath}` : `no config file; using defaults (run init). ${configInfo(eng.loaded)}`);
   try {
     eng.store.ensure();
     const probe = path.join(eng.store.inbox, `.doctor-${process.pid}`);

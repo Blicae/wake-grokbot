@@ -23,7 +23,7 @@ describe("release (the woken run reports it is finished)", () => {
     expect(srv.hits).toHaveLength(2);
     expect(JSON.parse(srv.hits[1]!.body).wake.ids).toEqual([b.id, c.id]);
     expect((await s.run(["release"])).out).toMatch(/released: grokbot/);
-    expect((await s.run(["release"])).out).toMatch(/nothing in flight/);
+    expect((await s.run(["release"])).out).toMatch(/nothing was in flight/);
     expect((await s.run(["release", "nope"])).code).toBe(1);
   });
   it("an unknown wake that the run reports on becomes started", async () => {
@@ -115,5 +115,30 @@ describe("live-test style config", () => {
     expect(states).toEqual(["started", "coalesced", "coalesced"]);
     expect(srv.hits).toHaveLength(1);
     expect(srv.hits[0]!.headers.authorization).toBe(`Bearer ${KEY}`);
+  });
+});
+
+describe("release delivers queued wakes even when nothing is in flight", () => {
+  it("retries a not_started wake right away (no backoff wait) after the key is fixed", async () => {
+    const srv = await stub();
+    const s = sandbox(grokCfg(), { WAKE_GROKBOT_URL: srv.url });
+    const e = task();
+    expect((await s.run(["send", "--json"], JSON.stringify(e))).code).toBe(5); // key missing
+    const r1 = await s.run(["release", "grokbot"]);
+    expect(r1.code).toBe(5);
+    expect(r1.out).toMatch(/nothing was in flight/);
+    expect(r1.out).toMatch(/grokbot: wake not_started/);
+    s.env.WAKE_GROKBOT_KEY = KEY;
+    const r2 = await s.run(["release", "grokbot"]);
+    expect(r2.code).toBe(0);
+    expect(r2.out).toMatch(/grokbot: wake started/);
+    expect(srv.hits).toHaveLength(1);
+    expect((await s.run(["status", e.id, "--json"])).json().wake.state).toBe("started");
+  });
+  it("says so when there is nothing queued", async () => {
+    const { s } = await setup();
+    const r = await s.run(["release", "grokbot"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/nothing queued to deliver/);
   });
 });
