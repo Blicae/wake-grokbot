@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { usage } from "./errors.js";
 import { channelNames } from "./channels/index.js";
 import { readJson } from "./fsutil.js";
-import { ENV, configPath, dataDir, stateDir } from "./paths.js";
+import { ENV, configCandidates, dataDir, stateDir } from "./paths.js";
 
 export interface TargetConfig {
   channel: "grokbot" | "script" | string;
@@ -92,9 +92,17 @@ export const EXAMPLE_CONFIG = {
 
 export interface Loaded {
   cfg: Config;
+  /** the config file that was loaded, or null when none was found */
   path: string | null;
+  /** every path looked at, in order */
+  searched: string[];
   inbox: string;
   state: string;
+}
+
+/** "config: <path or none>; searched: a, b" for error messages. */
+export function configInfo(l: Pick<Loaded, "path" | "searched">): string {
+  return `config: ${l.path ?? "none found"}; searched: ${l.searched.join(", ")}`;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
@@ -143,24 +151,26 @@ export function validateConfig(cfg: Config): string[] {
   return p;
 }
 
-export function loadConfig(opts: { config?: string; inbox?: string; env?: NodeJS.ProcessEnv } = {}): Loaded {
+export function loadConfig(opts: { config?: string; inbox?: string; env?: NodeJS.ProcessEnv; cwd?: string } = {}): Loaded {
   const env = opts.env ?? process.env;
-  const file = configPath(opts.config, env);
+  const cand = configCandidates(opts.config, env, opts.cwd ?? process.cwd());
+  const searched = cand.paths;
+  const file = searched.find((p) => fs.existsSync(p));
   let cfg = DEFAULTS;
   let used: string | null = null;
-  if (fs.existsSync(file)) {
+  if (file) {
     try {
       cfg = merge(DEFAULTS, readJson<unknown>(file));
     } catch (e) {
       throw usage(`config is not valid JSON: ${file} (${(e as Error).message})`);
     }
     used = file;
-  } else if (opts.config || env[ENV.CONFIG]) {
-    throw usage(`config file not found: ${file}`);
+  } else if (cand.explicit) {
+    throw usage(`config file not found (${configInfo({ path: null, searched })})`);
   }
   delete (cfg as unknown as Record<string, unknown>).$comment;
   const problems = validateConfig(cfg);
-  if (problems.length) throw usage("config error: " + problems.join("; "));
+  if (problems.length) throw usage(`config error: ${problems.join("; ")} (${configInfo({ path: used, searched })})`);
   const base = used ? path.dirname(used) : process.cwd();
   const res = (p: string) => path.resolve(base, p.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || "~"));
   const inbox = opts.inbox ? path.resolve(opts.inbox) : env[ENV.INBOX] ? path.resolve(env[ENV.INBOX]!) : cfg.inbox ? res(cfg.inbox) : path.join(dataDir(env), "inbox");
@@ -172,5 +182,5 @@ export function loadConfig(opts: { config?: string; inbox?: string; env?: NodeJS
     if (t.url_file) t.url_file = res(t.url_file);
     if (t.key_file) t.key_file = res(t.key_file);
   }
-  return { cfg, path: used, inbox, state };
+  return { cfg, path: used, searched, inbox, state };
 }

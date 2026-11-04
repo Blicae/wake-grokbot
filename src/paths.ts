@@ -31,6 +31,17 @@ export function dataDir(env: Env = process.env): string {
   return path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), PROG);
 }
 
+/**
+ * Config discovery order: --config, $WAKE_GROKBOT_CONFIG, ./wake-grokbot.json (current folder), user config folder.
+ * An explicit --config or $WAKE_GROKBOT_CONFIG is the only candidate (it must exist).
+ */
+export function configCandidates(explicit?: string, env: Env = process.env, cwd: string = process.cwd()): { explicit: boolean; paths: string[] } {
+  if (explicit) return { explicit: true, paths: [path.resolve(cwd, explicit)] };
+  if (env[ENV.CONFIG]) return { explicit: true, paths: [path.resolve(cwd, env[ENV.CONFIG]!)] };
+  return { explicit: false, paths: [path.join(cwd, `${PROG}.json`), path.join(configDir(env), `${PROG}.json`)] };
+}
+
+/** Where `init` writes: --config, $WAKE_GROKBOT_CONFIG, else the user config folder. */
 export function configPath(explicit?: string, env: Env = process.env): string {
   if (explicit) return path.resolve(explicit);
   if (env[ENV.CONFIG]) return path.resolve(env[ENV.CONFIG]!);

@@ -49,6 +49,11 @@ Examples are in [`fixtures/`](../fixtures); [`fixtures/invalid/`](../fixtures/in
 
 `working` and `needs_input` go out as `type: "answer"`; the others are final and go out as `type: "receipt"`.
 
+## Config discovery
+
+`--config`, then `$WAKE_GROKBOT_CONFIG`, then `./wake-grokbot.json` in the current folder, then
+`wake-grokbot.json` in the user config folder. Relative paths inside the config resolve against the config file.
+
 ## Inbox layout
 
 ```
