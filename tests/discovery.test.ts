@@ -13,7 +13,7 @@ describe("config discovery order", () => {
     const cwd = path.join(s.dir, "work");
     fs.mkdirSync(cwd);
     expect(configCandidates("x.json", s.env, cwd).paths).toEqual([path.join(cwd, "x.json")]);
-    expect(configCandidates(undefined, { ...s.env, WAKE_GROKBOT_CONFIG: "/abs/c.json" }, cwd).paths).toEqual([path.resolve("/abs/c.json")]);
+    expect(configCandidates(undefined, { ...s.env, WAKE_GROKBOT_CONFIG: "/abs/c.json" }, cwd).paths).toEqual([path.resolve(cwd, "/abs/c.json")]);
     const auto = configCandidates(undefined, s.env, cwd);
     expect(auto.explicit).toBe(false);
     expect(auto.paths[0]).toBe(path.join(cwd, "wake-grokbot.json"));
