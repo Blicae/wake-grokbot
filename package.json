@@ -58,13 +58,13 @@
     "url": "https://github.com/Blicae8917/wake-grokbot/issues"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
-    "@types/node": "^22.20.5",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "eslint": "^9.39.5",
-    "typescript": "^5.9.3",
+    "eslint": "^10.14.0",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.5"
   }
 }
