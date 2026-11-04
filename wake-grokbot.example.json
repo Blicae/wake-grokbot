@@ -1,0 +1,58 @@
+{
+  "$comment": "wake-grokbot config. Never put secrets or URLs here: only names of environment variables or files outside the repo.",
+  "inbox": "",
+  "state_dir": "",
+  "sign": {
+    "key_file": "",
+    "require": false
+  },
+  "wake": {
+    "targets": {
+      "worker": "grokbot"
+    },
+    "hourly_cap": 60,
+    "max_attempts": 5,
+    "inflight_ttl_minutes": 30,
+    "timeout_seconds": 20
+  },
+  "targets": {
+    "grokbot": {
+      "channel": "grokbot",
+      "routine": "default",
+      "url_env": "WAKE_GROKBOT_URL",
+      "key_env": "WAKE_GROKBOT_KEY",
+      "payload_key": "text",
+      "template": "",
+      "per_routine_hourly_cap": 200
+    }
+  },
+  "sinks": {
+    "file": {
+      "dir": ""
+    },
+    "webhooks": {
+      "my-hook": {
+        "url_env": "MY_HOOK_URL",
+        "secret_env": "MY_HOOK_SECRET"
+      }
+    },
+    "commands": {
+      "my-engine": {
+        "argv": [
+          "my-engine",
+          "ingest",
+          "--from",
+          "wake-grokbot",
+          "-"
+        ],
+        "timeout_seconds": 60
+      }
+    },
+    "report_roots": []
+  },
+  "sources": {
+    "my-engine": {
+      "require_sig": false
+    }
+  }
+}

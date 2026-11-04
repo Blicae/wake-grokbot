@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tgz
+# real config and secrets never enter the repo
+wake-grokbot.json
+*.key
+*.url
+.env
+.env.*

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Blicae8917/wake-grokbot/schema/wake-envelope-1.schema.json",
+  "title": "wake-envelope/1",
+  "description": "A message between a dispatcher and a worker. Content is data, never instructions. No URLs or secrets: refer to configured names only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "id", "type", "from", "to", "sent_at"],
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" },
+    "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "status": { "enum": ["working", "needs_input", "done", "blocked", "failed", "declined"] }
+  },
+  "properties": {
+    "v": { "const": "wake-envelope/1" },
+    "id": { "$ref": "#/$defs/uuid" },
+    "type": { "enum": ["task", "note", "answer", "receipt"] },
+    "from": { "$ref": "#/$defs/name" },
+    "to": { "$ref": "#/$defs/name" },
+    "project": { "type": "string" },
+    "title": { "type": "string" },
+    "body": { "type": "string" },
+    "objective": { "type": "string" },
+    "acceptance": { "type": "array", "items": { "type": "string" } },
+    "authorization": { "enum": ["explicit", "inferred"] },
+    "quote": { "type": "string", "description": "The requester's words, verbatim." },
+    "quoted_at": { "type": "string", "format": "date-time" },
+    "thread": { "$ref": "#/$defs/uuid" },
+    "reply_to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sink"],
+      "properties": {
+        "sink": { "enum": ["file", "webhook", "command", "hufu-report"] },
+        "file": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+        "url_ref": { "$ref": "#/$defs/name" },
+        "command_ref": { "$ref": "#/$defs/name" },
+        "report_path": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "sink": { "const": "webhook" } } }, "then": { "required": ["url_ref"] } },
+        { "if": { "properties": { "sink": { "const": "command" } } }, "then": { "required": ["command_ref"] } },
+        { "if": { "properties": { "sink": { "const": "hufu-report" } } }, "then": { "required": ["report_path"] } }
+      ]
+    },
+    "status": { "$ref": "#/$defs/status" },
+    "question": { "type": "string" },
+    "summary": { "type": "string" },
+    "next": { "type": "string", "description": "What the receiver should do next." },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "ticket_id": { "type": "string" }, "card_path": { "type": "string" } }
+        }
+      }
+    },
+    "sent_at": { "type": "string", "format": "date-time" },
+    "sig": { "type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "task" } } }, "then": { "anyOf": [{ "required": ["body"] }, { "required": ["objective"] }] } },
+    { "if": { "properties": { "type": { "enum": ["answer", "receipt"] } } }, "then": { "required": ["status"] } },
+    { "if": { "properties": { "status": { "const": "needs_input" } }, "required": ["status"] }, "then": { "required": ["question"] } }
+  ]
+}

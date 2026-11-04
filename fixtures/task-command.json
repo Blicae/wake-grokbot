@@ -1,0 +1,14 @@
+{
+  "v": "wake-envelope/1",
+  "id": "77777777-7777-4777-8777-777777777777",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Translate the changelog",
+  "objective": "Translate CHANGELOG.md into Chinese.",
+  "reply_to": {
+    "sink": "command",
+    "command_ref": "my-engine"
+  },
+  "sent_at": "2026-11-05T07:00:00Z"
+}

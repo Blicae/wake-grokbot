@@ -1,0 +1,27 @@
+{
+  "v": "wake-envelope/1",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "project": "demo",
+  "title": "Tidy the README",
+  "objective": "Rewrite the install section so a new user can follow it.",
+  "acceptance": [
+    "Install steps work on Windows and Linux",
+    "No broken links"
+  ],
+  "authorization": "explicit",
+  "quote": "please clean up the install part of the readme",
+  "quoted_at": "2026-11-05T01:00:00Z",
+  "thread": "11111111-1111-4111-8111-111111111111",
+  "reply_to": {
+    "sink": "file"
+  },
+  "task": {
+    "ref": {
+      "ticket_id": "T-1"
+    }
+  },
+  "sent_at": "2026-11-05T01:02:03Z"
+}

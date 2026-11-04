@@ -1,0 +1,69 @@
+{
+  "name": "wake-grokbot",
+  "version": "0.1.0",
+  "description": "Dispatch tasks to agents through a file inbox with idempotent receipts, and wake a Grok Bot when there is work.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "wake-grokbot": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "schema",
+    "fixtures",
+    "docs",
+    "skills",
+    "examples",
+    "wake-grokbot.example.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "grok-bot",
+    "agents",
+    "inbox",
+    "wake",
+    "webhook",
+    "dispatch",
+    "receipts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Blicae8917/wake-grokbot.git"
+  },
+  "homepage": "https://github.com/Blicae8917/wake-grokbot#readme",
+  "bugs": {
+    "url": "https://github.com/Blicae8917/wake-grokbot/issues"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}
