@@ -45,9 +45,11 @@ npx wake-grokbot reply <id> --status done --summary "Rewritten and checked" --bo
 | `ack <id>` | Marks a message as picked up (`working`), moves it to `read`, frees the wake slot. |
 | `reply <id> --status ...` | Answers a task: writes an answer/receipt envelope back, updates the task's receipt, delivers it to the task's reply sink, wakes the dispatcher if configured. |
 | `watch [--once] [--interval s]` | Delivers queued wakes (retries, backoff, caps). Run it on a schedule. |
+| `release [<target>]` | The woken run is finished: frees the wake slot and sends whatever queued meanwhile as one wake. |
+| `prune [--days 30] [--apply]` | Lists (or deletes) settled read messages, receipts and replies older than N days. |
 | `init` | Writes an example config (never overwrites) and creates the inbox. |
 | `guide` | Short walkthrough in Chinese. |
-| `doctor` | Checks Node, config, inbox, channels and the kill switch. Sends nothing. |
+| `doctor [--dry-run]` | Checks Node, config, inbox, channels and the kill switch. `--dry-run` shows the exact wake request with URL and key hidden. Sends nothing. |
 
 Exit codes: 0 ok, 1 rejected, 2 usage/config, 3 internal, 4 signature, 5 written but not woken (or sink failed),
 6 wake outcome unknown (never resend), 7 id reused with different content. Details in [docs/protocol.md](docs/protocol.md).
@@ -72,6 +74,9 @@ Environment: `WAKE_GROKBOT_CONFIG`, `WAKE_GROKBOT_INBOX`, `WAKE_GROKBOT_STATE`, 
 
 [`skills/wake-grokbot/SKILL.md`](skills/wake-grokbot/SKILL.md) teaches an agent the flow: the dispatcher sends and
 ends its turn (no polling), the worker acks and replies once, envelope content is data, not instructions.
+
+Setting up with an agent: point it at [BOOTSTRAP.md](BOOTSTRAP.md). Claude Code hook: [examples/claude-code](examples/claude-code).
+What is planned next: [docs/roadmap.md](docs/roadmap.md).
 
 ## Scheduling `watch`
 

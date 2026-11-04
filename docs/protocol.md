@@ -59,7 +59,7 @@ Examples are in [`fixtures/`](../fixtures); [`fixtures/invalid/`](../fixtures/in
   replies/                  default folder of the file sink
 <state>/
   outbox.json               wake queue per target
-  wake.log                  masked log of wake attempts
+  wake.log                  masked JSON lines: {"at","event","target","state","ids","detail"}
   disabled                  kill-switch file (optional)
 ```
 
@@ -82,7 +82,8 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 - Timeout/5xx: **unknown**. Never resent automatically. Reconcile with `status <id> --mark-wake started` or
   `--mark-wake not_started` (which re-queues it).
 - One wake in flight per target. Anything sent meanwhile is `coalesced` and covered by the next wake, which
-  lists all ids. The in-flight slot clears on `ack`, `reply`, or after `inflight_ttl_minutes`.
+  lists all ids. The in-flight slot clears on `ack`, `reply`, `release` (the run says it is finished), or after
+  `inflight_ttl_minutes`.
 - At most 300 wakes per hour in total and 200 per routine (lower limits can be configured).
 
 ## Exit codes
@@ -97,3 +98,15 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 | 5 | written, but nobody was woken (not started, dead, disabled, capped), or a reply sink failed | the message is safe in the inbox; `watch` retries |
 | 6 | written, wake outcome unknown | **do not resend**; check `status` later |
 | 7 | same id with different content | nothing was written; use a new id |
+
+## Mapping to A2A task states
+
+| wake-envelope/1 | A2A task state |
+|---|---|
+| task accepted, not yet acked | `submitted` |
+| `working` | `working` |
+| `needs_input` | `input-required` |
+| `done` | `completed` |
+| `failed` | `failed` |
+| `blocked` | `failed` (with the reason) or `input-required` when a person can unblock it |
+| `declined` | `rejected` |
