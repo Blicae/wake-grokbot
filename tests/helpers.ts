@@ -6,9 +6,14 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach } from "vitest";
 import { main } from "../src/main.js";
+import { setRegistryReader } from "../src/winenv.js";
+
+// Tests never read the real Windows registry; individual tests install a fake reader.
+setRegistryReader(() => undefined);
 
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
+  setRegistryReader(() => undefined);
   while (cleanups.length) await cleanups.pop()!();
 });
 

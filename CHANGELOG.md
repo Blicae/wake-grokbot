@@ -12,5 +12,8 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Reply sinks: `file`, `webhook` (HMAC-SHA256), `command`, `hufu-report` (report file plus `.DONE` marker).
 - Agent skill at `skills/wake-grokbot/SKILL.md`.
 - `release`, `prune`, `doctor --dry-run`, JSON log lines, target `description`/`capabilities`, `send --id/--thread`.
+- Config discovery order (`--config`, `$WAKE_GROKBOT_CONFIG`, `./wake-grokbot.json`, user folder); errors name the config and the paths searched.
+- Windows: variables missing from the process are read from the user, then machine environment (registry); `doctor` shows the source.
+- `release` also delivers queued wakes when nothing is in flight and retries a not_started wake without waiting for the backoff.
 - Claude Code Stop/SubagentStop hook example, BOOTSTRAP.md for agents, A2A state mapping, roadmap.
 - Release workflow (npm provenance, tag-triggered), Dependabot, issue/PR templates, code of conduct.

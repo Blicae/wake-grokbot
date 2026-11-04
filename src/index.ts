@@ -6,3 +6,4 @@ export { EXIT, CliError } from "./errors.js";
 export { registerChannel, channelNames, type Channel, type WakePayload, type WakeOutcome } from "./channels/index.js";
 export { deliver, renderReport, webhookSignature, SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./sinks.js";
 export { mask, normalizeKey } from "./secrets.js";
+export { resolveEnv, setRegistryReader, parseRegQuery, type EnvSource, type RegistryReader } from "./winenv.js";

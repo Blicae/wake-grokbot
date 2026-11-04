@@ -56,12 +56,23 @@ Exit codes: 0 ok, 1 rejected, 2 usage/config, 3 internal, 4 signature, 5 written
 
 ## Config
 
-JSON at `wake-grokbot.json` in the user config folder (`%APPDATA%\wake-grokbot\`, `~/Library/Application Support/wake-grokbot/`,
-or `$XDG_CONFIG_HOME/wake-grokbot/`), or `--config`, or `WAKE_GROKBOT_CONFIG`. See
+A JSON file found in this order (first match wins):
+
+1. `--config <file>`
+2. `$WAKE_GROKBOT_CONFIG`
+3. `./wake-grokbot.json` in the current folder
+4. `wake-grokbot.json` in the user config folder (`%APPDATA%\wake-grokbot\`, `~/Library/Application Support/wake-grokbot/`,
+   or `$XDG_CONFIG_HOME/wake-grokbot/`)
+
+An explicit 1 or 2 must exist. Errors about missing targets or config name the file that was loaded and the paths searched.
+`init` writes to 1, 2 or 4. See
 [`wake-grokbot.example.json`](wake-grokbot.example.json). It holds only names of environment variables and files.
 
 Environment: `WAKE_GROKBOT_CONFIG`, `WAKE_GROKBOT_INBOX`, `WAKE_GROKBOT_STATE`, `WAKE_GROKBOT_URL`,
-`WAKE_GROKBOT_KEY`, `WAKE_GROKBOT_DISABLED` (kill switch).
+`WAKE_GROKBOT_KEY`, `WAKE_GROKBOT_DISABLED` (kill switch). On Windows, a variable that is missing from the
+current process (for example set with `[Environment]::SetEnvironmentVariable(..., 'User')` after the terminal
+was opened) is read from the user, then the machine environment in the registry. `doctor` shows where each
+one came from (process/user/machine/missing), never the value.
 
 ## Wake channels and reply sinks
 

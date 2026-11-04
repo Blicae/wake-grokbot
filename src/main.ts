@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { makeChannel } from "./channels/index.js";
-import { configInfo, EXAMPLE_CONFIG, loadConfig } from "./config.js";
+import { type Config, configInfo, EXAMPLE_CONFIG, loadConfig } from "./config.js";
 import { Engine } from "./core.js";
 import { type Envelope, type Status, STATUSES, VERSION } from "./envelope.js";
 import { CliError, EXIT, usage } from "./errors.js";
@@ -12,6 +12,7 @@ import { atomicWrite } from "./fsutil.js";
 import { GUIDE_ZH } from "./guide.js";
 import { configPath, ENV, PROG } from "./paths.js";
 import { mask, normalizeKey, readStream, registerSecret } from "./secrets.js";
+import { type EnvSource, resolveEnv } from "./winenv.js";
 
 export const VERSION_STRING = "0.1.0";
 
@@ -146,10 +147,17 @@ async function run(argv: string[], io: Io): Promise<number> {
     if (!stdinKey) throw usage("--key-stdin: nothing on stdin");
     registerSecret(stdinKey);
   }
+  // Windows: pick up User/Machine variables that this terminal has not seen yet (values never printed)
+  const pre = resolveEnv(io.env, [...Object.values(ENV), "WAKE_GROKBOT_URL"]);
+  io = { ...io, env: pre.env };
   for (const k of [ENV.KEY, "WAKE_GROKBOT_URL"]) registerSecret(io.env[k]);
 
   if (cmd === "init") return init(o, io);
-  const loaded = loadConfig({ config: o.config, inbox: o.inbox, env: io.env });
+  const loaded0 = loadConfig({ config: o.config, inbox: o.inbox, env: io.env });
+  const post = resolveEnv(io.env, configEnvRefs(loaded0.cfg));
+  io = { ...io, env: post.env };
+  const envSources = { ...pre.sources, ...post.sources };
+  const loaded = loaded0;
   const eng = new Engine(loaded, { env: io.env, stdinKey });
   const print = (r: { code: number; message: string; receipt: unknown }, extra: Record<string, unknown> = {}) => {
     if (o.json) io.out(JSON.stringify({ ...(r.receipt as object), ...extra }, null, 2) + "\n");
@@ -267,7 +275,7 @@ async function run(argv: string[], io: Io): Promise<number> {
       return 0;
     }
     case "doctor":
-      return doctor(eng, loaded.path, io, stdinKey, !!o["dry-run"]);
+      return doctor(eng, loaded.path, io, stdinKey, !!o["dry-run"], envSources, configEnvRefs(loaded.cfg));
     default:
       throw usage(`unknown command ${cmd}; see ${PROG} --help`);
   }
@@ -297,7 +305,28 @@ function init(o: { config?: string; inbox?: string; "print-config"?: boolean; fo
   return 0;
 }
 
-async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: string, dryRun = false): Promise<number> {
+/** Names of environment variables the config refers to (never values). */
+export function configEnvRefs(cfg: Config): string[] {
+  const names: string[] = [];
+  for (const t of Object.values(cfg.targets)) {
+    if (t.channel === "grokbot") {
+      names.push(t.url_env || (t.url_file ? "" : "WAKE_GROKBOT_URL"));
+      names.push(t.key_env || (t.key_file ? "" : ENV.KEY));
+    }
+  }
+  for (const h of Object.values(cfg.sinks.webhooks)) names.push(h.url_env, h.secret_env);
+  return [...new Set(names.filter(Boolean))];
+}
+
+async function doctor(
+  eng: Engine,
+  cfgPath: string | null,
+  io: Io,
+  stdinKey?: string,
+  dryRun = false,
+  sources: Record<string, EnvSource> = {},
+  refs: string[] = [],
+): Promise<number> {
   let bad = 0;
   const say = (ok: boolean | "warn", m: string) => {
     if (ok === false) bad++;
@@ -314,6 +343,10 @@ async function doctor(eng: Engine, cfgPath: string | null, io: Io, stdinKey?: st
     say(true, `inbox writable: ${eng.store.inbox}`);
   } catch (e) {
     say(false, `inbox not writable: ${mask((e as Error).message)}`);
+  }
+  for (const name of refs) {
+    const src = sources[name] ?? "missing";
+    say(src === "missing" ? "warn" : true, `env ${name}: ${src === "missing" ? "missing" : `found (${src === "process" ? "process" : src === "user" ? "user registry" : "machine registry"})`}`);
   }
   const off = eng.disabled();
   say(off ? "warn" : true, `kill switch ${off ? "ON: " + off : "off"}`);

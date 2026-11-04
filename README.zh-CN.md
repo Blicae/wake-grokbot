@@ -62,6 +62,20 @@ npx wake-grokbot reply <id> --status done --summary "已改好并验证" --body-
   后面接一句话总结；需要人决定时第二行是 `待人工决定：…`；再往下是正文。报告写完后才创建 `<报告>.DONE` 标记。
   报告路径必须在配置允许的目录里。
 
+## 配置文件在哪
+
+按顺序找，找到第一个就用：
+
+1. `--config <文件>`
+2. 环境变量 `WAKE_GROKBOT_CONFIG`
+3. 当前目录下的 `./wake-grokbot.json`
+4. 用户配置目录里的 `wake-grokbot.json`（Windows 是 `%APPDATA%\wake-grokbot\`）
+
+用 1 或 2 指定时文件必须存在。找不到目标或配置时，报错会写明用的是哪个配置文件、找过哪些位置。
+
+Windows 上，如果环境变量是用 `[Environment]::SetEnvironmentVariable(..., 'User')` 设的、当前窗口还没生效，
+程序会自动从注册表里的用户变量、再到系统变量去读。`doctor` 会显示每个变量是从哪里读到的（进程/用户/系统/缺失），不显示值。
+
 ## 紧急停止
 
 设置环境变量 `WAKE_GROKBOT_DISABLED=1`，或在状态目录放一个名为 `disabled` 的文件。消息照常写入，只是不再唤醒。
