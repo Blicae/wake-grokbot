@@ -197,6 +197,8 @@ async function run(argv: string[], io: Io): Promise<number> {
       if (!src) throw usage(`unknown source ${o.from}; add it under "sources" in the config (${configInfo(loaded)})`);
       const env = parseJson(await readInput(io, pos[0]), "envelope") as Envelope;
       if (env && typeof env === "object" && env.from !== o.from) throw new CliError(`envelope.from must be ${o.from}`, EXIT.RULE);
+      // an envelope that is already past its expires_at is refused before anything is written (exit 1, like any invalid envelope)
+      if (env && typeof env === "object" && isExpired(env)) throw new CliError(`envelope expired at ${env.expires_at}; nothing written`, EXIT.RULE);
       return print(await eng.accept(env, { ingestedFrom: o.from, requireSig: !!src.require_sig, noWake: o["no-wake"] }));
     }
     case "status": {

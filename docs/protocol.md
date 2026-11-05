@@ -26,7 +26,7 @@ Examples are in [`fixtures/`](../fixtures); [`fixtures/invalid/`](../fixtures/in
 | `next` | no | What the receiver should do next (for example `review and close T-1`). |
 | `task.ref` | no | `{ "ticket_id", "card_path" }` pointing at the sender's own tracker. |
 | `sent_at` | yes | ISO 8601 time. |
-| `expires_at` | no | ISO 8601 time after which the envelope is stale. It is still stored; `status` and `watch` flag unsettled envelopes past this time as expired. Part of the signed content. |
+| `expires_at` | no | ISO 8601 time after which the envelope is stale. It is still stored; `status` and `watch` flag unsettled envelopes past this time as expired. `ingest` refuses an envelope that is already past `expires_at` (exit 1, nothing written). Part of the signed content. |
 | `sig` | no | `hmac-sha256:<hex>` over `"wake-envelope/1\n" + canonical JSON` (keys sorted, `sig` left out). |
 
 ### Content rules
@@ -97,7 +97,7 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 | code | meaning | what to do |
 |---|---|---|
 | 0 | ok (also: same id with the same content again) | nothing |
-| 1 | rejected by a rule (invalid envelope, unknown id, URL/secret inside) | fix the envelope |
+| 1 | rejected by a rule (invalid envelope, unknown id, URL/secret inside, `ingest` of an envelope already past `expires_at`) | fix the envelope |
 | 2 | usage or config error | fix the command or config |
 | 3 | internal error | report a bug |
 | 4 | signature missing, malformed or wrong | check keys |

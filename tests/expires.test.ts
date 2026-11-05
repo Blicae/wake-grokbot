@@ -52,3 +52,18 @@ describe("expires_at (optional replay/staleness window)", () => {
     expect(w.out).toMatch(new RegExp(`expired: ${e.id} \\(expires_at ${PAST}, status queued\\)`));
   });
 });
+
+describe("ingest refuses envelopes already past expires_at", () => {
+  it("exit 1, nothing written; a future expires_at is accepted", async () => {
+    const fs = await import("node:fs");
+    const s = sandbox({ sources: { "my-engine": { require_sig: false } } });
+    const old = task({ from: "my-engine", expires_at: PAST });
+    const r = await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(old));
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`envelope expired at ${PAST}; nothing written`);
+    expect(fs.existsSync(s.inbox)).toBe(false);
+    const ok = task({ from: "my-engine", expires_at: FUTURE });
+    expect((await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(ok))).code).toBe(0);
+    expect((await s.run(["status", old.id])).code).toBe(1);
+  });
+});
