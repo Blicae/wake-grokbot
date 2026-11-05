@@ -80,4 +80,16 @@ describe("rate limits (HTTP 429, or 400 with a rate-limit message)", () => {
     expect(parseRetryAfter("-5", now)).toBeUndefined();
     expect(parseRetryAfter(undefined, now)).toBeUndefined();
   });
+  it("Retry-After is capped at 24 hours (seconds and HTTP date)", () => {
+    const now = Date.parse("2026-11-05T00:00:00Z");
+    expect(parseRetryAfter(String(24 * 3600), now)).toBe(24 * 3600_000);
+    expect(parseRetryAfter(String(3 * 24 * 3600), now)).toBe(24 * 3600_000);
+    expect(parseRetryAfter("Sun, 08 Nov 2026 00:00:00 GMT", now)).toBe(24 * 3600_000);
+  });
+  it("429 with a huge Retry-After waits 24 hours", async () => {
+    const { wait } = await sendOnce(() => ({ status: 429, headers: { "retry-after": "9999999" } }));
+    expect(wait.min).toBeLessThanOrEqual(24 * 60 * MIN);
+    expect(wait.max).toBeGreaterThanOrEqual(24 * 60 * MIN);
+  });
 });
+

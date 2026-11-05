@@ -39,14 +39,22 @@ export type PostOutcome = {
 
 const RATE_LIMIT_TEXT = /rate[\s_-]?limit|too many requests|throttl|quota exceeded|slow down/i;
 
-/** Retry-After as milliseconds from `now`: delta-seconds or an HTTP date. Undefined when absent or invalid. */
+/** Longest Retry-After honored; anything longer waits this long. */
+export const RETRY_AFTER_MAX_MS = 24 * 3600_000;
+
+/** Retry-After as milliseconds from `now`: delta-seconds or an HTTP date. Capped at 24 hours; undefined when absent or invalid. */
 export function parseRetryAfter(v: string | null | undefined, now = Date.now()): number | undefined {
   const t = (v ?? "").trim();
   if (!t) return undefined;
-  if (/^\d+$/.test(t)) return Number(t) * 1000;
-  if (!/[a-z]/i.test(t)) return undefined; // HTTP dates name the weekday/month; "-5" etc. are invalid
-  const d = Date.parse(t);
-  return Number.isNaN(d) ? undefined : Math.max(0, d - now);
+  let ms: number;
+  if (/^\d+$/.test(t)) ms = Number(t) * 1000;
+  else {
+    if (!/[a-z]/i.test(t)) return undefined; // HTTP dates name the weekday/month; "-5" etc. are invalid
+    const d = Date.parse(t);
+    if (Number.isNaN(d)) return undefined;
+    ms = Math.max(0, d - now);
+  }
+  return Math.min(ms, RETRY_AFTER_MAX_MS);
 }
 
 /**
