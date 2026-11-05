@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ChannelContext, makeChannel, type WakePayload } from "./channels/index.js";
+import { type ChannelContext, makeChannel, type WakeOutcome, type WakePayload } from "./channels/index.js";
 import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
 import { contentHash, type Envelope, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
@@ -11,6 +11,10 @@ import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
 import { deliver } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
+
+/** Rate-limited wakes without Retry-After back off 15, 30, 60 ... minutes (ordinary 4xx: 1, 2, 4 ... 60). */
+const RATE_LIMIT_START_MINUTES = 15;
+const RATE_LIMIT_MAX_MINUTES = 240;
 
 export interface EngineOptions {
   env?: NodeJS.ProcessEnv;
@@ -213,7 +217,7 @@ export class Engine {
         count: pick.length,
       };
       const ctx: ChannelContext = { env: this.env, timeoutMs, stdinKey: this.opts.stdinKey };
-      let outcome: { state: "started" | "not_started" | "unknown"; detail: string };
+      let outcome: WakeOutcome;
       try {
         const ch = makeChannel(name, tcfg);
         ch.check(ctx);
@@ -245,7 +249,9 @@ export class Engine {
             this.setWake(pick, "dead", name, `${outcome.detail}; gave up after ${this.cfg.wake.max_attempts} attempts`);
           } else {
             ts.queue = [...pick, ...ts.queue];
-            const backoff = Math.min(60, 2 ** (ts.attempts - 1)) * 60_000;
+            const backoff = outcome.rateLimited
+              ? (outcome.retryAfterMs ?? Math.min(RATE_LIMIT_MAX_MINUTES, RATE_LIMIT_START_MINUTES * 2 ** (ts.attempts - 1)) * 60_000)
+              : Math.min(60, 2 ** (ts.attempts - 1)) * 60_000;
             ts.next_at = new Date(this.now() + backoff).toISOString();
             this.setWake(pick, "not_started", name, `${outcome.detail}; retry after ${ts.next_at}`);
           }

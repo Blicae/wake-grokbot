@@ -84,6 +84,8 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 
 - 2xx means the routine **started**, not that the work is done. Results are read from the inbox.
 - 4xx/redirect/connection refused: not started, safe to resend. Retries back off 1, 2, 4 ... 60 minutes.
+- Rate limit (HTTP 429, or HTTP 400 whose body mentions a rate limit / too many requests): not started. The retry
+  waits for `Retry-After` (seconds or HTTP date) when given, otherwise 15, 30, 60 ... 240 minutes.
 - Timeout/5xx: **unknown**. Never resent automatically. Reconcile with `status <id> --mark-wake started` or
   `--mark-wake not_started` (which re-queues it).
 - One wake in flight per target. Anything sent meanwhile is `coalesced` and covered by the next wake, which

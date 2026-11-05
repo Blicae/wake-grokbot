@@ -63,7 +63,7 @@ export interface Hit {
 }
 
 /** Local stub HTTP server on 127.0.0.1. `reply` decides each response. */
-export async function stub(reply: (hit: Hit, n: number) => { status: number; headers?: Record<string, string>; delayMs?: number } = () => ({ status: 200 })) {
+export async function stub(reply: (hit: Hit, n: number) => { status: number; headers?: Record<string, string>; delayMs?: number; body?: string; hang?: boolean } = () => ({ status: 200 })) {
   const hits: Hit[] = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -72,10 +72,11 @@ export async function stub(reply: (hit: Hit, n: number) => { status: number; hea
       const hit = { method: req.method ?? "", url: req.url ?? "", headers: req.headers, body };
       hits.push(hit);
       const r = reply(hit, hits.length);
+      if (r.hang) return; // never answer: the client times out or is killed mid-send
       const send = () => {
         if (res.destroyed) return;
         res.writeHead(r.status, r.headers);
-        res.end("{}");
+        res.end(r.body ?? "{}");
       };
       if (r.delayMs) setTimeout(send, r.delayMs);
       else send();
