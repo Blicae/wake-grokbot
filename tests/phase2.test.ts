@@ -165,6 +165,7 @@ describe("prune keeps a light record of pruned ids", () => {
       const r = await s.run(["send", "--json"], JSON.stringify(env));
       expect(r.code).toBe(1);
       expect(r.err).toContain("receipt was pruned");
+      expect(fs.existsSync(path.join(s.state, "state.lock"))).toBe(false); // lock released on refusal
     }
     expect(fs.existsSync(path.join(s.inbox, "receipts", `${done.id}.json`))).toBe(false);
     expect(fs.existsSync(path.join(s.inbox, "msg", "to-worker", "unread", `${done.id}.json`))).toBe(false);
