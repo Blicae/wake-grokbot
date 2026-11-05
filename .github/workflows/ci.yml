@@ -14,15 +14,38 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: npm pack file whitelist
+        run: node scripts/check-pack.mjs
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # The published package has no runtime dependencies; gate on those, report dev-only advisories without failing.
+      - name: dependency audit (runtime, gating)
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: dependency audit (dev, report only)
+        run: npm audit --audit-level=moderate || echo "::warning::dev dependency advisories; see log"
+      - name: workflow security scan (zizmor)
+        run: pipx run zizmor==1.32.0 --offline --format plain .github/workflows
