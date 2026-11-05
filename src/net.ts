@@ -27,7 +27,35 @@ export function resolveUrl(opts: { env?: string; file?: string; what: string }, 
 
 export class ChannelConfigError extends Error {}
 
-export type PostOutcome = { state: "started" | "not_started" | "unknown"; status?: number; detail: string };
+export type PostOutcome = {
+  state: "started" | "not_started" | "unknown";
+  status?: number;
+  detail: string;
+  /** HTTP 429, or a 400 whose body says it is a rate limit. */
+  rateLimited?: boolean;
+  /** From a Retry-After header (seconds or HTTP date), when present and valid. */
+  retryAfterMs?: number;
+};
+
+const RATE_LIMIT_TEXT = /rate[\s_-]?limit|too many requests|throttl|quota exceeded|slow down/i;
+
+/** Longest Retry-After honored; anything longer waits this long. */
+export const RETRY_AFTER_MAX_MS = 24 * 3600_000;
+
+/** Retry-After as milliseconds from `now`: delta-seconds or an HTTP date. Capped at 24 hours; undefined when absent or invalid. */
+export function parseRetryAfter(v: string | null | undefined, now = Date.now()): number | undefined {
+  const t = (v ?? "").trim();
+  if (!t) return undefined;
+  let ms: number;
+  if (/^\d+$/.test(t)) ms = Number(t) * 1000;
+  else {
+    if (!/[a-z]/i.test(t)) return undefined; // HTTP dates name the weekday/month; "-5" etc. are invalid
+    const d = Date.parse(t);
+    if (Number.isNaN(d)) return undefined;
+    ms = Math.max(0, d - now);
+  }
+  return Math.min(ms, RETRY_AFTER_MAX_MS);
+}
 
 /**
  * POST JSON. Redirects are refused (never followed). 2xx = accepted/started; 3xx/4xx = not started (safe to
@@ -52,8 +80,13 @@ export async function postJson(url: string, body: unknown, headers: Record<strin
     if (err.name === "TimeoutError" || err.name === "AbortError") return { state: "unknown", detail: "timed out; outcome unknown" };
     return { state: "unknown", detail: mask(`request failed (${code || err.name}); outcome unknown`) };
   }
-  await res.arrayBuffer().catch(() => undefined);
   const s = res.status;
+  // Read at most a small prefix of the body; it is only scanned for a rate-limit hint, never logged.
+  const text = s === 400 ? await res.text().catch(() => "") : (await res.arrayBuffer().catch(() => undefined), "");
+  if (s === 429 || (s === 400 && RATE_LIMIT_TEXT.test(text.slice(0, 4096)))) {
+    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+    return { state: "not_started", status: s, detail: `rate limited (HTTP ${s})`, rateLimited: true, ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) };
+  }
   if (res.type === "opaqueredirect" || (s >= 300 && s < 400)) return { state: "not_started", status: s, detail: `redirect refused (HTTP ${s || 3})` };
   if (s >= 200 && s < 300) return { state: "started", status: s, detail: `HTTP ${s}` };
   if (s >= 400 && s < 500) return { state: "not_started", status: s, detail: `HTTP ${s}` };

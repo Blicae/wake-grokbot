@@ -16,6 +16,9 @@ export interface WakePayload {
 export interface WakeOutcome {
   state: "started" | "not_started" | "unknown";
   detail: string;
+  /** The target said "too many requests": back off longer (Retry-After, else from 15 minutes). */
+  rateLimited?: boolean;
+  retryAfterMs?: number;
 }
 
 export interface ChannelContext {

@@ -71,6 +71,11 @@ export class GrokBotChannel implements Channel {
     const key = this.key(ctx);
     const body = { [String(this.cfg.payload_key || "text")]: this.text(p), wake: p };
     const r = await postJson(url, body, { authorization: `Bearer ${key}` }, ctx.timeoutMs);
-    return { state: r.state, detail: `grokbot ${r.detail}` };
+    return {
+      state: r.state,
+      detail: `grokbot ${r.detail}`,
+      ...(r.rateLimited ? { rateLimited: true } : {}),
+      ...(r.retryAfterMs !== undefined ? { retryAfterMs: r.retryAfterMs } : {}),
+    };
   }
 }

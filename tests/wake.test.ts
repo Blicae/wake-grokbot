@@ -174,7 +174,7 @@ describe("outbox: backoff, dead state, caps", () => {
     expect((await s.run(["doctor"])).out).toMatch(/dead wake/);
   });
   it("backoff doubles: 1, 2, 4 minutes", async () => {
-    const { s } = await setup(() => ({ status: 429 }));
+    const { s } = await setup(() => ({ status: 403 }));
     await s.run(["send", "--json"], JSON.stringify(task()));
     const read = () => JSON.parse(fs.readFileSync(path.join(s.state, "outbox.json"), "utf8")).targets.grokbot;
     const l = loadConfig({ config: s.cfgPath, env: s.env });

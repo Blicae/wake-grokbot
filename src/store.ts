@@ -42,6 +42,10 @@ export interface TargetState {
   attempts: number;
   next_at: string | null;
   dead: { ids: string[]; at: string; detail: string }[];
+  /** First rate-limited result of the current unbroken run of rate limits (ISO time); null/absent otherwise. */
+  rate_limited_since?: string | null;
+  /** Rate-limited results in that run (sets the 15, 30, 60 ... minute backoff). */
+  rate_limit_count?: number;
 }
 
 export interface Outbox {

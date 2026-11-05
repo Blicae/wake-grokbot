@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ChannelContext, makeChannel, type WakePayload } from "./channels/index.js";
+import { type ChannelContext, makeChannel, type WakeOutcome, type WakePayload } from "./channels/index.js";
 import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
 import { contentHash, type Envelope, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
@@ -11,6 +11,12 @@ import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
 import { deliver } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
+
+/** Rate-limited wakes without Retry-After back off 15, 30, 60 ... minutes (ordinary 4xx: 1, 2, 4 ... 60). */
+const RATE_LIMIT_START_MINUTES = 15;
+const RATE_LIMIT_MAX_MINUTES = 240;
+/** Rate limits do not count toward max_attempts; a run of them gives up after this long without any other result. */
+const RATE_LIMIT_GIVE_UP_MS = 24 * 3600_000;
 
 export interface EngineOptions {
   env?: NodeJS.ProcessEnv;
@@ -213,7 +219,7 @@ export class Engine {
         count: pick.length,
       };
       const ctx: ChannelContext = { env: this.env, timeoutMs, stdinKey: this.opts.stdinKey };
-      let outcome: { state: "started" | "not_started" | "unknown"; detail: string };
+      let outcome: WakeOutcome;
       try {
         const ch = makeChannel(name, tcfg);
         ch.check(ctx);
@@ -225,6 +231,11 @@ export class Engine {
         const ob = this.store.loadOutbox();
         const ts = this.store.target(ob, name);
         const at = new Date(this.now()).toISOString();
+        // Any result other than a rate limit ends the current run of rate limits.
+        if (!(outcome.state === "not_started" && outcome.rateLimited)) {
+          ts.rate_limited_since = null;
+          ts.rate_limit_count = 0;
+        }
         if (outcome.state === "started") {
           ts.inflight = { ids: pick, at, sending: false, unknown: false };
           ts.attempts = 0;
@@ -235,6 +246,24 @@ export class Engine {
           ts.inflight = { ids: pick, at, sending: false, unknown: true };
           ob.sent.push({ at, target: name, routine });
           this.setWake(pick, "unknown", name, outcome.detail);
+        } else if (outcome.rateLimited) {
+          ts.inflight = null;
+          ts.rate_limited_since ??= at;
+          ts.rate_limit_count = (ts.rate_limit_count ?? 0) + 1;
+          if (Date.parse(at) - Date.parse(ts.rate_limited_since) > RATE_LIMIT_GIVE_UP_MS) {
+            ts.dead.push({ ids: pick, at, detail: outcome.detail });
+            ts.next_at = null;
+            const since = ts.rate_limited_since;
+            ts.rate_limited_since = null;
+            ts.rate_limit_count = 0;
+            this.setWake(pick, "dead", name, `${outcome.detail}; gave up after more than 24 hours of rate limits (since ${since})`);
+          } else {
+            ts.queue = [...pick, ...ts.queue];
+            const n = ts.rate_limit_count;
+            const backoff = outcome.retryAfterMs ?? Math.min(RATE_LIMIT_MAX_MINUTES, RATE_LIMIT_START_MINUTES * 2 ** (n - 1)) * 60_000;
+            ts.next_at = new Date(this.now() + backoff).toISOString();
+            this.setWake(pick, "not_started", name, `${outcome.detail}; retry after ${ts.next_at}`);
+          }
         } else {
           ts.inflight = null;
           ts.attempts += 1;
