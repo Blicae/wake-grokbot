@@ -1,0 +1,504 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CLI contract > --version 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "0.1.0
+",
+}
+`;
+
+exports[`CLI contract > ack → receipt with status working 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "working",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>",
+  "acked_at": "<TIME>"
+}
+",
+}
+`;
+
+exports[`CLI contract > ack → receipt with status working 2`] = `
+{
+  "code": 1,
+  "err": "wake-grokbot: no such id: c0000000-0000-4000-8000-000000000002
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > doctor without wake targets; init --print-config 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "ok   node <VER> (need >= 22)
+ok   config <DIR>/wake-grokbot.json
+ok   inbox writable: <DIR>/inbox
+ok   kill switch off
+warn no wake targets: messages are written but nobody is woken
+",
+}
+`;
+
+exports[`CLI contract > doctor without wake targets; init --print-config 2`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "$comment": "wake-grokbot config. Never put secrets or URLs here: only names of environment variables or files outside the repo.",
+  "inbox": "",
+  "state_dir": "",
+  "sign": {
+    "key_file": "",
+    "require": false
+  },
+  "wake": {
+    "targets": {
+      "worker": "grokbot"
+    },
+    "hourly_cap": 60,
+    "max_attempts": 5,
+    "inflight_ttl_minutes": 30,
+    "timeout_seconds": 20
+  },
+  "targets": {
+    "grokbot": {
+      "channel": "grokbot",
+      "routine": "default",
+      "url_env": "WAKE_GROKBOT_URL",
+      "key_env": "WAKE_GROKBOT_KEY",
+      "payload_key": "text",
+      "template": "",
+      "per_routine_hourly_cap": 200
+    }
+  },
+  "sinks": {
+    "file": {
+      "dir": ""
+    },
+    "webhooks": {
+      "my-hook": {
+        "url_env": "MY_HOOK_URL",
+        "secret_env": "MY_HOOK_SECRET"
+      }
+    },
+    "commands": {
+      "my-engine": {
+        "argv": [
+          "my-engine",
+          "ingest",
+          "--from",
+          "wake-grokbot",
+          "-"
+        ],
+        "timeout_seconds": 60
+      }
+    },
+    "report_roots": []
+  },
+  "sources": {
+    "my-engine": {
+      "require_sig": false
+    }
+  }
+}
+",
+}
+`;
+
+exports[`CLI contract > ingest: missing --from → 2; wrong from → 1; configured source → 0 1`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: ingest needs --from <source name>
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > ingest: missing --from → 2; wrong from → 1; configured source → 0 2`] = `
+{
+  "code": 1,
+  "err": "wake-grokbot: envelope.from must be my-engine
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > ingest: missing --from → 2; wrong from → 1; configured source → 0 3`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000002",
+  "hash": "7d43f4f69fd285a6454cf59ae9f0f68658bc6da2172a9c7011f332aac992e360",
+  "type": "task",
+  "from": "my-engine",
+  "to": "worker",
+  "title": "Translate the changelog",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000002.json",
+  "status": "queued",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>",
+  "ingested_from": "my-engine"
+}
+",
+}
+`;
+
+exports[`CLI contract > invalid envelope → exit 1; invalid JSON → exit 2 1`] = `
+{
+  "code": 1,
+  "err": "wake-grokbot: invalid envelope: envelopes must not contain URLs (use config names such as reply_to.url_ref)
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > invalid envelope → exit 1; invalid JSON → exit 2 2`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: envelope is not valid JSON",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > no command → help on stdout, exit 2 1`] = `
+{
+  "code": 2,
+  "err": "",
+  "out": "wake-grokbot 0.1.0
+（中文说明：wake-grokbot guide）
+Local inbox + wake-up messages between a dispatcher and a worker agent.
+
+Usage: wake-grokbot <command> [options]
+
+Commands:
+  send --json [file|-]        accept a wake-envelope/1 from a file or stdin, then wake the other side
+  send --to <role> --title <t> [--objective <o>] [--body-file <f>] [--acceptance <a>]...
+                              build an envelope from flags (prints the id); --type note, --to dispatcher,
+                              --id <uuid>, --thread <uuid>
+  ingest --from <name> <file|->  accept an envelope from a configured external source
+  status [<id>] [--json] [--mark-wake started|not_started]
+                              show a receipt (or the outbox); reconcile an unknown wake by hand
+  ack <id> [--status working] mark a message as picked up
+  reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
+  reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
+  watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
+  release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
+  prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
+  init [--print-config] [--force]         write an example config and create the inbox
+  guide                       Chinese walkthrough
+  doctor [--dry-run]          check config, inbox, channels and kill switch (no secrets printed);
+                              --dry-run also shows the exact wake request, URL and key hidden, sends nothing
+
+Global options:
+  --config <file>   config file. Search order: --config, $WAKE_GROKBOT_CONFIG, ./wake-grokbot.json (current folder),
+                    then wake-grokbot.json in the user config folder
+  --inbox <dir>     inbox folder (or $WAKE_GROKBOT_INBOX)
+  --key-stdin       read the wake key from stdin (never pass keys as arguments)
+  --json            machine-readable output
+  -h, --help        this help;  -v, --version
+
+Exit codes: 0 ok, 1 rejected by a rule, 2 usage/config error, 3 internal error,
+  4 signature error, 5 written but not woken (or reply sink failed),
+  6 wake outcome unknown (do not resend), 7 same id with different content.
+",
+}
+`;
+
+exports[`CLI contract > reply: needs_input without question → 1; bad status → 2; done → receipt 1`] = `
+{
+  "code": 1,
+  "err": "wake-grokbot: invalid reply: status needs_input needs question
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > reply: needs_input without question → 1; bad status → 2; done → receipt 2`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: --status must be one of working, needs_input, done, blocked, failed, declined
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > reply: needs_input without question → 1; bad status → 2; done → receipt 3`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "done",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [
+    {
+      "id": "<UUID>",
+      "status": "done",
+      "at": "<TIME>",
+      "sink": "file",
+      "sink_result": "ok: file T-1.reply.json"
+    }
+  ],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>",
+  "next": "review",
+  "acked_at": "<TIME>",
+  "reply_id": "<UUID>"
+}
+",
+}
+`;
+
+exports[`CLI contract > same id, different content → exit 7 1`] = `
+{
+  "code": 7,
+  "err": "wake-grokbot: id c0000000-0000-4000-8000-000000000001 was already used with different content; nothing written
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > send --json (public task fixture) → receipt, exit 0 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "queued",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>"
+}
+",
+}
+`;
+
+exports[`CLI contract > send from flags with --id → text output 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "accepted c0000000-0000-4000-8000-000000000001; no wake target for worker, nobody woken
+",
+}
+`;
+
+exports[`CLI contract > send the same envelope twice → exit 0, same receipt; text output 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "queued",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>"
+}
+",
+}
+`;
+
+exports[`CLI contract > send the same envelope twice → exit 0, same receipt; text output 2`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "queued",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>"
+}
+",
+}
+`;
+
+exports[`CLI contract > signing required, unsigned envelope → exit 4 1`] = `
+{
+  "code": 4,
+  "err": "wake-grokbot: envelope signature missing (signing is required)
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > status <id> text and --json; unknown id → exit 1 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "c0000000-0000-4000-8000-000000000001 task dispatcher->worker status=queued wake=none
+",
+}
+`;
+
+exports[`CLI contract > status <id> text and --json; unknown id → exit 1 2`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "v": "wake-receipt/1",
+  "id": "c0000000-0000-4000-8000-000000000001",
+  "hash": "779dfa4ad5d5215cd39b97f6f87cf62df75d1a18c720d074eb092635c361e804",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Tidy the README",
+  "path": "msg/to-worker/unread/c0000000-0000-4000-8000-000000000001.json",
+  "status": "queued",
+  "wake": {
+    "state": "none"
+  },
+  "replies": [],
+  "created_at": "<TIME>",
+  "updated_at": "<TIME>"
+}
+",
+}
+`;
+
+exports[`CLI contract > status <id> text and --json; unknown id → exit 1 3`] = `
+{
+  "code": 1,
+  "err": "wake-grokbot: no such id: c0000000-0000-4000-8000-000000000002
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > status overview text and --json 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "kill switch: off
+wakes in the last hour: 0
+",
+}
+`;
+
+exports[`CLI contract > status overview text and --json 2`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "{
+  "disabled": null,
+  "targets": {},
+  "sent_last_hour": 0
+}
+",
+}
+`;
+
+exports[`CLI contract > unknown command and unknown flag → exit 2 1`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: unknown command frobnicate; see wake-grokbot --help
+",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > unknown command and unknown flag → exit 2 2`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: Unknown option ",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > watch --once, release, prune with nothing to do 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "",
+}
+`;
+
+exports[`CLI contract > watch --once, release, prune with nothing to do 2`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "nothing was in flight
+nothing queued to deliver
+",
+}
+`;
+
+exports[`CLI contract > watch --once, release, prune with nothing to do 3`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": "would delete (add --apply): 0 file(s)
+",
+}
+`;
+
+exports[`CLI contract > watch --once, release, prune with nothing to do 4`] = `
+{
+  "code": 2,
+  "err": "wake-grokbot: --interval must be >= 5 seconds
+",
+  "out": "",
+}
+`;
