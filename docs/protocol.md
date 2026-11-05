@@ -63,6 +63,7 @@ Examples are in [`fixtures/`](../fixtures); [`fixtures/invalid/`](../fixtures/in
   msg/to-dispatcher/{unread,read}/<id>.json
   receipts/<id>.json        sender-side state of every envelope (wake-receipt/1)
   replies/                  default folder of the file sink
+  pruned-ids.jsonl          one line per id removed by `prune --apply`: {"id","settled_at"}; that id is refused afterwards
 <state>/
   outbox.json               wake queue per target
   wake.log                  masked JSON lines: {"at","event","target","state","ids","detail"}
@@ -97,7 +98,7 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 | code | meaning | what to do |
 |---|---|---|
 | 0 | ok (also: same id with the same content again) | nothing |
-| 1 | rejected by a rule (invalid envelope, unknown id, URL/secret inside, `ingest` of an envelope already past `expires_at`) | fix the envelope |
+| 1 | rejected by a rule (invalid envelope, unknown id, URL/secret inside, `ingest` of an envelope already past `expires_at`, an id whose receipt was pruned) | fix the envelope |
 | 2 | usage or config error | fix the command or config |
 | 3 | internal error | report a bug |
 | 4 | signature missing, malformed or wrong | check keys |

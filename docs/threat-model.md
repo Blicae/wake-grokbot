@@ -60,8 +60,11 @@ Mitigations in place:
 - Outgoing webhook replies carry `x-wake-grokbot-timestamp`, and the timestamp is part of the HMAC, so a receiver
   can reject old deliveries.
 
-Gaps: receipts can be pruned (`prune --apply`); an id replayed after its receipt was pruned is accepted as new.
-There is no built-in rejection window on `sent_at`; use `expires_at` plus signatures for sources that matter.
+- `prune --apply` keeps a light record of each pruned id (`<inbox>/pruned-ids.jsonl`: `id` and `settled_at` only,
+  no content). The same id sent again after pruning is refused (exit 1, nothing written).
+
+Gaps: deleting `pruned-ids.jsonl` by hand reopens replay of pruned ids. There is no built-in rejection window on
+`sent_at`; use `expires_at` plus signatures for sources that matter.
 
 ## 3. Forged replies and forged envelopes
 

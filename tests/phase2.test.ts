@@ -142,3 +142,32 @@ describe("release delivers queued wakes even when nothing is in flight", () => {
     expect(r.out).toMatch(/nothing queued to deliver/);
   });
 });
+
+describe("prune keeps a light record of pruned ids", () => {
+  it("prune --apply records id + settled_at only; the same id again is refused (exit 1, nothing written)", async () => {
+    const s = sandbox();
+    const done = task();
+    await s.run(["send", "--json"], JSON.stringify(done));
+    await s.run(["reply", done.id, "--status", "done", "--summary", "ok"]);
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    const d = path.join(s.inbox, "msg", "to-worker", "read");
+    for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), old, old);
+    await s.run(["prune", "--days", "30"]);
+    expect(fs.existsSync(path.join(s.inbox, "pruned-ids.jsonl"))).toBe(false); // dry run records nothing
+    expect((await s.run(["prune", "--days", "30", "--apply"])).code).toBe(0);
+    const lines = fs.readFileSync(path.join(s.inbox, "pruned-ids.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(Object.keys(lines[0]).sort()).toEqual(["id", "settled_at"]);
+    expect(lines[0].id).toBe(done.id);
+    expect(Number.isNaN(Date.parse(lines[0].settled_at))).toBe(false);
+    expect(fs.existsSync(path.join(s.inbox, "receipts", `${done.id}.json`))).toBe(false);
+    for (const env of [done, { ...done, title: "changed" }]) {
+      const r = await s.run(["send", "--json"], JSON.stringify(env));
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("receipt was pruned");
+    }
+    expect(fs.existsSync(path.join(s.inbox, "receipts", `${done.id}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(s.inbox, "msg", "to-worker", "unread", `${done.id}.json`))).toBe(false);
+    expect((await s.run(["send", "--json"], JSON.stringify(task()))).code).toBe(0); // other ids are fine
+  });
+});

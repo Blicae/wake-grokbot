@@ -115,6 +115,7 @@ export class Engine {
     const accepted = this.store.lock(() => {
       this.store.ensure();
       const old = this.store.readReceipt(e.id);
+      if (!old && this.store.wasPruned(e.id)) throw rule(`id ${e.id} was already used and its receipt was pruned; nothing written, use a new id`);
       if (old) {
         if (old.hash !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
         return { receipt: old, fresh: false };
@@ -404,6 +405,7 @@ export class Engine {
   prune(days: number, apply: boolean): { files: string[] } {
     const cutoff = this.now() - days * 86_400_000;
     const files: string[] = [];
+    const pruned: { id: string; settled_at: string }[] = [];
     return this.store.lock(() => {
       for (const side of ["to-worker", "to-dispatcher"]) {
         const dir = path.join(this.store.inbox, "msg", side, "read");
@@ -418,7 +420,10 @@ export class Engine {
           if (!settled) continue;
           files.push(p);
           const rp = this.store.receiptPath(id);
-          if (fs.existsSync(rp)) files.push(rp);
+          if (fs.existsSync(rp)) {
+            files.push(rp);
+            pruned.push({ id, settled_at: r?.updated_at ?? new Date(fs.statSync(p).mtimeMs).toISOString() });
+          }
         }
       }
       const rdir = path.join(this.store.inbox, "replies");
@@ -427,7 +432,10 @@ export class Engine {
           const p = path.join(rdir, f);
           if (fs.statSync(p).isFile() && fs.statSync(p).mtimeMs < cutoff) files.push(p);
         }
-      if (apply) for (const f of files) fs.rmSync(f, { force: true });
+      if (apply) {
+        this.store.recordPruned(pruned); // before deleting: a crash in between leaves a record, never a replay hole
+        for (const f of files) fs.rmSync(f, { force: true });
+      }
       if (apply && files.length) this.store.log("pruned", { count: files.length, days });
       return { files: files.map((f) => path.relative(this.store.inbox, f).split(path.sep).join("/")) };
     });
