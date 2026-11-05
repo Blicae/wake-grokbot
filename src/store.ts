@@ -86,6 +86,28 @@ export class Store {
     atomicWrite(this.receiptPath(r.id), JSON.stringify(r, null, 2) + "\n");
   }
 
+  /** Pruned ids: one JSON line per pruned envelope, `{"id","settled_at"}` (no content), so a replay is still refused. */
+  prunedPath(): string {
+    return path.join(this.inbox, "pruned-ids.jsonl");
+  }
+
+  wasPruned(id: string): boolean {
+    const p = this.prunedPath();
+    if (!fs.existsSync(p)) return false;
+    return fs.readFileSync(p, "utf8").split("\n").some((l) => {
+      try {
+        return l.trim() !== "" && (JSON.parse(l) as { id?: string }).id === id;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  recordPruned(entries: { id: string; settled_at: string }[]): void {
+    if (!entries.length) return;
+    fs.appendFileSync(this.prunedPath(), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  }
+
   /** Find an envelope file by id in either side's unread/read folders. */
   findEnvelope(id: string): string | null {
     for (const side of ["worker", "dispatcher"])

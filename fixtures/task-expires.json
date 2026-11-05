@@ -1,0 +1,12 @@
+{
+  "v": "wake-envelope/1",
+  "id": "66666666-6666-4666-8666-666666666666",
+  "type": "task",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Check the nightly build",
+  "objective": "Look at last night's build and say whether it passed.",
+  "authorization": "explicit",
+  "sent_at": "2026-11-05T01:00:00Z",
+  "expires_at": "2026-11-05T13:00:00Z"
+}

@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { type ChannelContext, makeChannel, type WakeOutcome, type WakePayload } from "./channels/index.js";
 import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
-import { contentHash, type Envelope, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
+import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
 import { atomicCreate, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
@@ -102,7 +102,7 @@ export class Engine {
   }
 
   /** send / ingest: validate, check the signature, store idempotently, queue a wake. */
-  async accept(raw: unknown, o: { ingestedFrom?: string; requireSig?: boolean; noWake?: boolean } = {}): Promise<Result> {
+  async accept(raw: unknown, o: { ingestedFrom?: string; requireSig?: boolean; noWake?: boolean; rejectExpired?: boolean } = {}): Promise<Result> {
     const problems = validate(raw);
     if (problems.length) throw rule("invalid envelope: " + problems.join("; "));
     const e = raw as Envelope;
@@ -121,6 +121,9 @@ export class Engine {
     const accepted = this.store.lock(() => {
       this.store.ensure();
       const old = this.store.readReceipt(e.id);
+      // order: a known id follows the idempotency rules (0 / 7, no expiry check); then pruned ids; then expiry for new ids
+      if (!old && this.store.wasPruned(e.id)) throw rule(`id ${e.id} was already used and its receipt was pruned; nothing written, use a new id`);
+      if (!old && !this.store.findEnvelope(e.id) && o.rejectExpired && isExpired(e, this.now())) throw rule(`envelope expired at ${e.expires_at}; nothing written`);
       if (old) {
         if (old.hash !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
         return { receipt: old, fresh: false };
@@ -433,6 +436,7 @@ export class Engine {
   prune(days: number, apply: boolean): { files: string[] } {
     const cutoff = this.now() - days * 86_400_000;
     const files: string[] = [];
+    const pruned: { id: string; settled_at: string }[] = [];
     return this.store.lock(() => {
       for (const side of ["to-worker", "to-dispatcher"]) {
         const dir = path.join(this.store.inbox, "msg", side, "read");
@@ -447,7 +451,10 @@ export class Engine {
           if (!settled) continue;
           files.push(p);
           const rp = this.store.receiptPath(id);
-          if (fs.existsSync(rp)) files.push(rp);
+          if (fs.existsSync(rp)) {
+            files.push(rp);
+            pruned.push({ id, settled_at: r?.updated_at ?? new Date(fs.statSync(p).mtimeMs).toISOString() });
+          }
         }
       }
       const rdir = path.join(this.store.inbox, "replies");
@@ -456,7 +463,10 @@ export class Engine {
           const p = path.join(rdir, f);
           if (fs.statSync(p).isFile() && fs.statSync(p).mtimeMs < cutoff) files.push(p);
         }
-      if (apply) for (const f of files) fs.rmSync(f, { force: true });
+      if (apply) {
+        this.store.recordPruned(pruned); // before deleting: a crash in between leaves a record, never a replay hole
+        for (const f of files) fs.rmSync(f, { force: true });
+      }
       if (apply && files.length) this.store.log("pruned", { count: files.length, days });
       return { files: files.map((f) => path.relative(this.store.inbox, f).split(path.sep).join("/")) };
     });

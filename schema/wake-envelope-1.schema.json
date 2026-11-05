@@ -59,6 +59,7 @@
       }
     },
     "sent_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time", "description": "Optional. After this time the envelope is stale: status and watch flag it as expired. It is still stored, never acted on automatically." },
     "sig": { "type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$" }
   },
   "allOf": [
