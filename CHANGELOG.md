@@ -18,6 +18,12 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Rate limits: HTTP 429, or a 400 that says it is a rate limit, waits for `Retry-After` (capped at 24 hours), otherwise backs off from 15 minutes (up to 240). Rate limits do not count toward `max_attempts`; a wake is dead only after more than 24 hours of uninterrupted rate limits.
 - Claude Code Stop/SubagentStop hook example, BOOTSTRAP.md for agents, A2A state mapping, roadmap.
 - Release workflow (npm provenance, tag-triggered), Dependabot, issue/PR templates, code of conduct.
+- Optional `expires_at` envelope field. `ingest` checks the id first: a known id follows the idempotency rules (same content: 0, different content: 7); an id removed by `prune` is refused (1); a new id already past `expires_at` is refused (1) and nothing is written. `status` and `watch` flag envelopes that expired after they were accepted.
+- `prune --apply` records each removed id in `pruned-ids.jsonl` (id and settle time only); the same id sent again is always refused.
+- CLI contract tests: snapshots lock exit codes, output and receipt fields for each command.
+- `docs/threat-model.md` (key flow, replay, forged replies, path traversal, envelope injection).
+- `docs/engine-interface.md`: one page on waking a seat, the `wake-envelope/1` format and the report file plus `.DONE` loop.
+- `docs/gbmsg-migration.md`: migration framework (wake-grokbot side only; switch-over and rollback steps are placeholders).
 
 ### Known issues
 
