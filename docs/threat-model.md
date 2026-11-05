@@ -54,7 +54,8 @@ Mitigations in place:
 - `sent_at` is part of the hashed and signed content, so a replay cannot freshen it without breaking the signature.
 - **`expires_at` (optional).** A sender can bound how long an envelope is meaningful. After that time `status` and
   `watch` flag the envelope as expired while it is still unsettled. `expires_at` is covered by the signature.
-  `ingest` refuses an envelope that is already past `expires_at` (exit 1, nothing written). An envelope that expires
+  Order on `ingest`: a known id follows the idempotency rules (0 / 7, no expiry check); a pruned id is refused (1);
+  only a new id is checked against `expires_at`, and one already past it is refused (exit 1, nothing written). An envelope that expires
   after it was accepted is still stored and nothing is deleted automatically, so a worker should check it before acting.
 - Wakes are rate-limited (hard caps per hour, one wake in flight per target) and can be stopped with the kill switch.
 - Outgoing webhook replies carry `x-wake-grokbot-timestamp`, and the timestamp is part of the HMAC, so a receiver

@@ -61,9 +61,25 @@ describe("ingest refuses envelopes already past expires_at", () => {
     const r = await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(old));
     expect(r.code).toBe(1);
     expect(r.err).toContain(`envelope expired at ${PAST}; nothing written`);
-    expect(fs.existsSync(s.inbox)).toBe(false);
+    const path = await import("node:path");
+    expect(fs.existsSync(path.join(s.inbox, "msg", "to-worker", "unread", `${old.id}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(s.inbox, "receipts", `${old.id}.json`))).toBe(false);
     const ok = task({ from: "my-engine", expires_at: FUTURE });
     expect((await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(ok))).code).toBe(0);
     expect((await s.run(["status", old.id])).code).toBe(1);
+  });
+
+  it("idempotency first: accepted before expiry, re-ingested unchanged after expiry → still 0; changed → 7", async () => {
+    const s = sandbox({ sources: { "my-engine": { require_sig: false } } });
+    const soon = new Date(Date.now() + 1500).toISOString();
+    const e = task({ from: "my-engine", expires_at: soon });
+    const first = await s.run(["ingest", "--from", "my-engine", "-", "--json"], JSON.stringify(e));
+    expect(first.code).toBe(0);
+    await new Promise((r) => setTimeout(r, 1700));
+    const again = await s.run(["ingest", "--from", "my-engine", "-", "--json"], JSON.stringify(e));
+    expect(again.code).toBe(0);
+    expect(again.json()).toEqual(first.json());
+    expect((await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify({ ...e, title: "changed" }))).code).toBe(7);
+    expect((await s.run(["status", e.id])).out).toContain("EXPIRED");
   });
 });

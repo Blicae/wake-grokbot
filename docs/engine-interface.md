@@ -59,8 +59,10 @@ Rules the engine must follow:
   `"wake-envelope/1\n"` + canonical JSON); missing or wrong signatures exit 4.
 - No URLs and no secrets anywhere in the envelope (exit 1). Refer to configured names instead.
 - `report_path` is absolute, has no `..`, and lies inside a `report_roots` folder.
-- Optional `expires_at` (ISO 8601): `ingest` refuses an envelope that is already past it (exit 1, the same class as
-  an invalid envelope; nothing is written). If it expires after it was accepted, `status` and `watch` flag the task
+- Optional `expires_at` (ISO 8601). `ingest` checks the id first: an id it has already accepted follows the
+  idempotency rules (same content → 0, different → 7) with no expiry check, so re-sending after expiry is safe.
+  A new id that is already past `expires_at` is refused (exit 1, the same class as an invalid envelope; nothing is
+  written). If it expires after it was accepted, `status` and `watch` flag the task
   as expired while unsettled.
 
 What happens: the envelope lands in `msg/to-worker/unread/<id>.json`, a receipt in `receipts/<id>.json`, and the

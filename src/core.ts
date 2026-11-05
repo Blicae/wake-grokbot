@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { type ChannelContext, makeChannel, type WakePayload } from "./channels/index.js";
 import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
-import { contentHash, type Envelope, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
+import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
 import { atomicCreate, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
@@ -96,7 +96,7 @@ export class Engine {
   }
 
   /** send / ingest: validate, check the signature, store idempotently, queue a wake. */
-  async accept(raw: unknown, o: { ingestedFrom?: string; requireSig?: boolean; noWake?: boolean } = {}): Promise<Result> {
+  async accept(raw: unknown, o: { ingestedFrom?: string; requireSig?: boolean; noWake?: boolean; rejectExpired?: boolean } = {}): Promise<Result> {
     const problems = validate(raw);
     if (problems.length) throw rule("invalid envelope: " + problems.join("; "));
     const e = raw as Envelope;
@@ -115,7 +115,9 @@ export class Engine {
     const accepted = this.store.lock(() => {
       this.store.ensure();
       const old = this.store.readReceipt(e.id);
+      // order: a known id follows the idempotency rules (0 / 7, no expiry check); then pruned ids; then expiry for new ids
       if (!old && this.store.wasPruned(e.id)) throw rule(`id ${e.id} was already used and its receipt was pruned; nothing written, use a new id`);
+      if (!old && !this.store.findEnvelope(e.id) && o.rejectExpired && isExpired(e, this.now())) throw rule(`envelope expired at ${e.expires_at}; nothing written`);
       if (old) {
         if (old.hash !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
         return { receipt: old, fresh: false };

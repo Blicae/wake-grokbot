@@ -26,7 +26,7 @@ Examples are in [`fixtures/`](../fixtures); [`fixtures/invalid/`](../fixtures/in
 | `next` | no | What the receiver should do next (for example `review and close T-1`). |
 | `task.ref` | no | `{ "ticket_id", "card_path" }` pointing at the sender's own tracker. |
 | `sent_at` | yes | ISO 8601 time. |
-| `expires_at` | no | ISO 8601 time after which the envelope is stale. It is still stored; `status` and `watch` flag unsettled envelopes past this time as expired. `ingest` refuses an envelope that is already past `expires_at` (exit 1, nothing written). Part of the signed content. |
+| `expires_at` | no | ISO 8601 time after which the envelope is stale. It is still stored; `status` and `watch` flag unsettled envelopes past this time as expired. On `ingest` the id is checked first: a known id follows the idempotency rules (same content → 0, different → 7) with no expiry check; a pruned id is refused (1); only a new id is checked against `expires_at`, and if it has passed the envelope is refused (exit 1, nothing written). Part of the signed content. |
 | `sig` | no | `hmac-sha256:<hex>` over `"wake-envelope/1\n" + canonical JSON` (keys sorted, `sig` left out). |
 
 ### Content rules
