@@ -18,3 +18,7 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Rate limits: HTTP 429, or a 400 that says it is a rate limit, waits for `Retry-After`, otherwise backs off from 15 minutes.
 - Claude Code Stop/SubagentStop hook example, BOOTSTRAP.md for agents, A2A state mapping, roadmap.
 - Release workflow (npm provenance, tag-triggered), Dependabot, issue/PR templates, code of conduct.
+
+### To do
+
+- TypeScript 7: upgrade once typescript-eslint supports it (8.72.1 needs typescript <6.1). Dev tooling stays on TypeScript 5.9.
