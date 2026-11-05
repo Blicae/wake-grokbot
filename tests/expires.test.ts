@@ -64,21 +64,25 @@ describe("ingest refuses envelopes already past expires_at", () => {
     const path = await import("node:path");
     expect(fs.existsSync(path.join(s.inbox, "msg", "to-worker", "unread", `${old.id}.json`))).toBe(false);
     expect(fs.existsSync(path.join(s.inbox, "receipts", `${old.id}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(s.state, "state.lock"))).toBe(false); // the lock is released on the refusal path too
     const ok = task({ from: "my-engine", expires_at: FUTURE });
     expect((await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(ok))).code).toBe(0);
     expect((await s.run(["status", old.id])).code).toBe(1);
   });
 
   it("idempotency first: accepted before expiry, re-ingested unchanged after expiry → still 0; changed → 7", async () => {
+    const { loadConfig } = await import("../src/config.js");
+    const { Engine } = await import("../src/core.js");
     const s = sandbox({ sources: { "my-engine": { require_sig: false } } });
-    const soon = new Date(Date.now() + 1500).toISOString();
-    const e = task({ from: "my-engine", expires_at: soon });
-    const first = await s.run(["ingest", "--from", "my-engine", "-", "--json"], JSON.stringify(e));
+    const e = task({ from: "my-engine", expires_at: PAST });
+    // first ingest happens "before" expiry: the engine's clock is injected (no real waiting)
+    const before = new Engine(loadConfig({ config: s.cfgPath, env: s.env }), { env: s.env, now: () => Date.parse(PAST) - 60_000 });
+    const first = await before.accept(e, { ingestedFrom: "my-engine", rejectExpired: true });
     expect(first.code).toBe(0);
-    await new Promise((r) => setTimeout(r, 1700));
+    // now (real clock) it is expired; the same envelope again is still an idempotent 0 with the same receipt
     const again = await s.run(["ingest", "--from", "my-engine", "-", "--json"], JSON.stringify(e));
     expect(again.code).toBe(0);
-    expect(again.json()).toEqual(first.json());
+    expect(again.json()).toEqual(JSON.parse(JSON.stringify(first.receipt)));
     expect((await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify({ ...e, title: "changed" }))).code).toBe(7);
     expect((await s.run(["status", e.id])).out).toContain("EXPIRED");
   });
