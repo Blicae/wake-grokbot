@@ -19,6 +19,10 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Claude Code Stop/SubagentStop hook example, BOOTSTRAP.md for agents, A2A state mapping, roadmap.
 - Release workflow (npm provenance, tag-triggered), Dependabot, issue/PR templates, code of conduct.
 
+### Known issues
+
+- Full `npm audit` reports 10 moderate advisories, all from minimatch in the typescript-eslint dependency chain (dev dependencies only; the published package has no runtime dependencies). Waiting for an upstream fix.
+
 ### To do
 
 - TypeScript 7: upgrade once typescript-eslint supports it (8.72.1 needs typescript <6.1). Dev tooling stays on TypeScript 5.9.
