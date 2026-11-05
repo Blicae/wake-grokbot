@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
+import { Engine } from "../src/core.js";
 import { parseRetryAfter } from "../src/net.js";
 import { grokCfg, KEY, sandbox, stub, task } from "./helpers.js";
 
@@ -93,3 +95,68 @@ describe("rate limits (HTTP 429, or 400 with a rate-limit message)", () => {
   });
 });
 
+const HOUR = 3600_000;
+
+describe("rate limits and dead state", () => {
+  async function at(s: Awaited<ReturnType<typeof sendOnce>>["s"], ms: number) {
+    const l = loadConfig({ config: s.cfgPath, env: s.env });
+    await new Engine(l, { env: s.env, now: () => ms }).pump();
+    return JSON.parse(fs.readFileSync(path.join(s.state, "outbox.json"), "utf8")).targets.grokbot;
+  }
+  const receipt = (s: Awaited<ReturnType<typeof sendOnce>>["s"], id: string) => JSON.parse(fs.readFileSync(path.join(s.inbox, "receipts", `${id}.json`), "utf8"));
+
+  it("rate limits for less than 24 hours: never dead, even past max_attempts; first time persisted", async () => {
+    const t0 = Date.now();
+    const { s, r, ts, srv } = await sendOnce(() => ({ status: 429 }));
+    const id = r.json().id as string;
+    expect(Date.parse(ts.rate_limited_since)).toBeGreaterThanOrEqual(t0 - 1000);
+    let t = ts;
+    // 4.5, 9 ... 22.5 hours (past the 240-minute backoff cap each time): 6 rate limits > max_attempts 5
+    for (let i = 1; i <= 5; i++) t = await at(s, t0 + i * 4.5 * HOUR);
+    expect(srv.hits).toHaveLength(6);
+    expect(t.attempts).toBe(0);
+    expect(t.rate_limit_count).toBe(6);
+    expect(t.dead).toEqual([]);
+    expect(t.queue).toContain(id);
+    expect(receipt(s, id).wake.state).toBe("not_started");
+  });
+  it("rate limited for more than 24 hours since the first one: dead", async () => {
+    const t0 = Date.now();
+    const { s, r } = await sendOnce(() => ({ status: 429 }));
+    const id = r.json().id as string;
+    await at(s, t0 + 12 * HOUR);
+    const t = await at(s, t0 + 24 * HOUR + 60_000);
+    expect(t.dead).toHaveLength(1);
+    expect(t.dead[0].ids).toEqual([id]);
+    expect(t.queue).toEqual([]);
+    expect(t.rate_limited_since).toBeNull();
+    expect(receipt(s, id).wake.state).toBe("dead");
+    expect(receipt(s, id).wake.detail).toContain("24 hours of rate limits");
+  });
+  it("a non-rate-limit result in between restarts the 24-hour clock", async () => {
+    const t0 = Date.now();
+    const { s, r } = await sendOnce((_, n) => ({ status: n === 2 ? 403 : 429 }));
+    const id = r.json().id as string;
+    let t = await at(s, t0 + 20 * HOUR); // 403: ordinary 4xx, clock reset, attempts 1
+    expect(t.rate_limited_since).toBeNull();
+    expect(t.attempts).toBe(1);
+    t = await at(s, t0 + 22 * HOUR); // 429 again: new run starts here
+    expect(Date.parse(t.rate_limited_since)).toBe(t0 + 22 * HOUR);
+    t = await at(s, t0 + 30 * HOUR); // 30h after the first, but only 8h into this run
+    expect(t.dead).toEqual([]);
+    t = await at(s, t0 + 46 * HOUR + 60_000); // > 24h into this run
+    expect(t.dead).toHaveLength(1);
+    expect(receipt(s, id).wake.state).toBe("dead");
+  });
+  it("ordinary 4xx still gives up after max_attempts", async () => {
+    const t0 = Date.now();
+    const { s, r, srv } = await sendOnce(() => ({ status: 403 }));
+    const id = r.json().id as string;
+    let t;
+    for (let i = 1; i <= 4; i++) t = await at(s, t0 + i * 2 * HOUR);
+    expect(srv.hits).toHaveLength(5);
+    expect(t.dead).toHaveLength(1);
+    expect(receipt(s, id).wake.state).toBe("dead");
+    expect(receipt(s, id).wake.detail).toContain("gave up after 5 attempts");
+  });
+});

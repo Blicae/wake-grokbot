@@ -85,7 +85,12 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 - 2xx means the routine **started**, not that the work is done. Results are read from the inbox.
 - 4xx/redirect/connection refused: not started, safe to resend. Retries back off 1, 2, 4 ... 60 minutes.
 - Rate limit (HTTP 429, or HTTP 400 whose body mentions a rate limit / too many requests): not started. The retry
-  waits for `Retry-After` (seconds or HTTP date) when given, otherwise 15, 30, 60 ... 240 minutes.
+  waits for `Retry-After` (seconds or HTTP date, capped at 24 hours) when given, otherwise 15, 30, 60 ... 240 minutes.
+  Rate limits do not count toward `max_attempts`. The outbox records the time of the first rate limit in an unbroken
+  run (`targets.<name>.rate_limited_since`, plus `rate_limit_count` for the backoff step). A wake is marked dead when
+  a rate-limited result arrives more than 24 hours after that time. Any other result (started, unknown, an ordinary
+  4xx, a config error) clears both fields, so the 24 hours start again at the next rate limit. Ordinary 4xx results
+  still count toward `max_attempts` as before.
 - Timeout/5xx: **unknown**. Never resent automatically. Reconcile with `status <id> --mark-wake started` or
   `--mark-wake not_started` (which re-queues it).
 - One wake in flight per target. Anything sent meanwhile is `coalesced` and covered by the next wake, which
