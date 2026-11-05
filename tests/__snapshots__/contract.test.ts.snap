@@ -444,7 +444,8 @@ exports[`CLI contract > status overview text and --json 2`] = `
   "out": "{
   "disabled": null,
   "targets": {},
-  "sent_last_hour": 0
+  "sent_last_hour": 0,
+  "expired": []
 }
 ",
 }

@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { makeChannel } from "./channels/index.js";
 import { type Config, configInfo, EXAMPLE_CONFIG, loadConfig } from "./config.js";
 import { Engine } from "./core.js";
-import { type Envelope, type Status, STATUSES, VERSION } from "./envelope.js";
+import { type Envelope, isExpired, isTerminal, type Status, STATUSES, VERSION } from "./envelope.js";
 import { CliError, EXIT, usage } from "./errors.js";
 import { atomicWrite } from "./fsutil.js";
 import { GUIDE_ZH } from "./guide.js";
@@ -203,7 +203,7 @@ async function run(argv: string[], io: Io): Promise<number> {
       const id = pos[0];
       if (!id) {
         const ob = eng.store.loadOutbox();
-        const view = { disabled: eng.disabled(), targets: ob.targets, sent_last_hour: ob.sent.filter((s) => Date.parse(s.at) > Date.now() - 3600_000).length };
+        const view = { disabled: eng.disabled(), targets: ob.targets, sent_last_hour: ob.sent.filter((s) => Date.parse(s.at) > Date.now() - 3600_000).length, expired: expiredOpen(eng) };
         io.out(o.json ? JSON.stringify(view, null, 2) + "\n" : summaryText(view));
         return 0;
       }
@@ -217,8 +217,10 @@ async function run(argv: string[], io: Io): Promise<number> {
       }
       const r = eng.store.readReceipt(id);
       if (!r) throw new CliError(`no such id: ${id}`, EXIT.RULE);
-      const line = `${r.id} ${r.type} ${r.from}->${r.to} status=${r.status} wake=${r.wake.state}${r.wake.detail ? ` (${r.wake.detail})` : ""}${r.next ? ` next=${r.next}` : ""}`;
-      return print({ code: 0, receipt: r, message: line });
+      const env = eng.store.readEnvelope(id);
+      const expired = !isTerminal(r.status === "queued" ? undefined : r.status) && isExpired(env);
+      const line = `${r.id} ${r.type} ${r.from}->${r.to} status=${r.status} wake=${r.wake.state}${r.wake.detail ? ` (${r.wake.detail})` : ""}${r.next ? ` next=${r.next}` : ""}${expired ? ` EXPIRED (expires_at ${env!.expires_at})` : ""}`;
+      return print({ code: 0, receipt: r, message: line }, expired ? { expired: true, expires_at: env!.expires_at } : {});
     }
     case "ack": {
       const id = pos[0];
@@ -251,6 +253,7 @@ async function run(argv: string[], io: Io): Promise<number> {
       for (;;) {
         const ev = await eng.pump();
         for (const e of ev) io.out(`${new Date().toISOString()} ${e.target}: ${e.state} ${e.detail}\n`);
+        for (const x of expiredOpen(eng)) io.out(`${new Date().toISOString()} expired: ${x.id} (expires_at ${x.expires_at}, status ${x.status})\n`);
         if (o.once) return 0;
         await new Promise((r) => setTimeout(r, interval * 1000));
       }
@@ -281,8 +284,29 @@ async function run(argv: string[], io: Io): Promise<number> {
   }
 }
 
-function summaryText(v: { disabled: string | null; targets: Record<string, { inflight: unknown; queue: string[]; dead: unknown[]; next_at: string | null }>; sent_last_hour: number }): string {
+/** Envelopes past their `expires_at` that are not settled yet (no done/failed/declined). Read-only. */
+function expiredOpen(eng: Engine): { id: string; expires_at: string; status: string }[] {
+  const dir = path.join(eng.store.inbox, "receipts");
+  if (!fs.existsSync(dir)) return [];
+  const out: { id: string; expires_at: string; status: string }[] = [];
+  for (const f of fs.readdirSync(dir).sort()) {
+    if (!f.endsWith(".json")) continue;
+    const id = f.slice(0, -5);
+    try {
+      const r = eng.store.readReceipt(id);
+      if (!r || isTerminal(r.status === "queued" ? undefined : r.status)) continue;
+      const env = eng.store.readEnvelope(id);
+      if (isExpired(env)) out.push({ id, expires_at: env!.expires_at!, status: r.status });
+    } catch {
+      /* an unreadable file is reported elsewhere; never break status */
+    }
+  }
+  return out;
+}
+
+function summaryText(v: { disabled: string | null; targets: Record<string, { inflight: unknown; queue: string[]; dead: unknown[]; next_at: string | null }>; sent_last_hour: number; expired: { id: string; expires_at: string; status: string }[] }): string {
   const lines = [`kill switch: ${v.disabled ?? "off"}`, `wakes in the last hour: ${v.sent_last_hour}`];
+  for (const x of v.expired) lines.push(`expired: ${x.id} (expires_at ${x.expires_at}, status ${x.status})`);
   for (const [n, t] of Object.entries(v.targets))
     lines.push(`${n}: in flight=${t.inflight ? "yes" : "no"} queued=${t.queue.length} dead=${t.dead.length}${t.next_at ? ` retry after ${t.next_at}` : ""}`);
   return lines.join("\n") + "\n";

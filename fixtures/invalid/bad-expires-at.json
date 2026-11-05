@@ -1,0 +1,10 @@
+{
+  "v": "wake-envelope/1",
+  "id": "77777777-7777-4777-8777-777777777777",
+  "type": "note",
+  "from": "dispatcher",
+  "to": "worker",
+  "title": "Stale soon",
+  "sent_at": "2026-11-05T01:00:00Z",
+  "expires_at": "tomorrow"
+}

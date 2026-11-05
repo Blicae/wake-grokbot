@@ -45,6 +45,8 @@ export interface Envelope {
   next?: string;
   task?: { ref?: { ticket_id?: string; card_path?: string } };
   sent_at: string;
+  /** optional: after this time the envelope is stale (status and watch flag it) */
+  expires_at?: string;
   sig?: string;
 }
 
@@ -54,7 +56,7 @@ const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/i;
 const SECRETISH_RE = /(authorization\s*:|bearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(sk-|ghp_|xox[abprs]-|glpat-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 const KNOWN = new Set([
   "v", "id", "type", "from", "to", "project", "title", "body", "objective", "acceptance", "authorization", "quote",
-  "quoted_at", "thread", "reply_to", "status", "question", "summary", "next", "task", "sent_at", "sig",
+  "quoted_at", "thread", "reply_to", "status", "question", "summary", "next", "task", "sent_at", "expires_at", "sig",
 ]);
 
 /** Validate an envelope. Returns a list of problems (empty = valid). Mirrors the JSON Schema plus content rules. */
@@ -72,6 +74,8 @@ export function validate(x: unknown): string[] {
     if (e[k] !== undefined && typeof e[k] !== "string") p.push(`${k} must be a string`);
   if (e.quoted_at !== undefined && (typeof e.quoted_at !== "string" || Number.isNaN(Date.parse(e.quoted_at))))
     p.push("quoted_at must be an ISO 8601 time");
+  if (e.expires_at !== undefined && (typeof e.expires_at !== "string" || Number.isNaN(Date.parse(e.expires_at))))
+    p.push("expires_at must be an ISO 8601 time");
   if (e.thread !== undefined && typeof e.thread === "string" && !UUID_RE.test(e.thread)) p.push("thread must be a UUID");
   if (e.acceptance !== undefined && (!Array.isArray(e.acceptance) || !e.acceptance.every((a) => typeof a === "string")))
     p.push("acceptance must be a list of strings");
@@ -156,6 +160,13 @@ export const REPORT_WORDS: Record<Status, string> = {
   failed: "失败",
   declined: "无需处理",
 };
+
+/** True when the envelope carries `expires_at` and that time has passed. */
+export function isExpired(e: Pick<Envelope, "expires_at"> | null | undefined, now = Date.now()): boolean {
+  if (!e?.expires_at) return false;
+  const t = Date.parse(e.expires_at);
+  return !Number.isNaN(t) && t <= now;
+}
 
 export function isTerminal(s: Status | undefined): boolean {
   return s === "done" || s === "failed" || s === "declined";
