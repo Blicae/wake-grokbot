@@ -172,3 +172,27 @@ describe("prune keeps a light record of pruned ids", () => {
     expect((await s.run(["send", "--json"], JSON.stringify(task()))).code).toBe(0); // other ids are fine
   });
 });
+
+describe("prune records ids of read envelopes that have no receipt", () => {
+  it("a receipt-less read envelope is recorded (settled_at = file time) and its id is refused afterwards", async () => {
+    const s = sandbox();
+    const e = task();
+    await s.run(["send", "--json"], JSON.stringify(e));
+    await s.run(["ack", e.id]);
+    fs.rmSync(path.join(s.inbox, "receipts", `${e.id}.json`)); // as if a crash lost the receipt
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    const file = path.join(s.inbox, "msg", "to-worker", "read", `${e.id}.json`);
+    fs.utimesSync(file, old, old);
+    expect((await s.run(["prune", "--days", "30", "--apply"])).code).toBe(0);
+    expect(fs.existsSync(file)).toBe(false);
+    const lines = fs.readFileSync(path.join(s.inbox, "pruned-ids.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const rec = lines.find((l) => l.id === e.id);
+    expect(rec).toBeTruthy();
+    expect(Math.abs(Date.parse(rec.settled_at) - old.getTime())).toBeLessThan(2000);
+    const again = await s.run(["send", "--json"], JSON.stringify(e));
+    expect(again.code).toBe(1);
+    expect(again.err).toContain("receipt was pruned");
+    expect(fs.existsSync(path.join(s.inbox, "msg", "to-worker", "unread", `${e.id}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(s.inbox, "receipts", `${e.id}.json`))).toBe(false);
+  });
+});

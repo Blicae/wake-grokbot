@@ -451,10 +451,10 @@ export class Engine {
           if (!settled) continue;
           files.push(p);
           const rp = this.store.receiptPath(id);
-          if (fs.existsSync(rp)) {
-            files.push(rp);
-            pruned.push({ id, settled_at: r?.updated_at ?? new Date(fs.statSync(p).mtimeMs).toISOString() });
-          }
+          if (fs.existsSync(rp)) files.push(rp);
+          // record every pruned envelope id, also one whose receipt is missing (e.g. after a crash);
+          // without a receipt, settled_at falls back to the envelope file's modification time
+          pruned.push({ id, settled_at: r?.updated_at ?? new Date(fs.statSync(p).mtimeMs).toISOString() });
         }
       }
       const rdir = path.join(this.store.inbox, "replies");
