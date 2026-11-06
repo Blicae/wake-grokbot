@@ -192,7 +192,7 @@ async function run(argv: string[], io: Io): Promise<number> {
         };
         if ((env as Envelope).type === "task" && !o.objective && body === undefined) (env as Envelope).objective = o.title;
       }
-      return print(await eng.accept(env, { noWake: o["no-wake"] }));
+      return print(await eng.accept(env, { noWake: o["no-wake"], rejectExpired: true }));
     }
     case "ingest": {
       if (!o.from) throw usage("ingest needs --from <source name>");

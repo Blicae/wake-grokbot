@@ -144,7 +144,7 @@ export class Engine {
       }
       let file: string;
       if (existing) {
-        // crash after the envelope, before its receipt: the envelope file is the source of truth
+        // crash after the envelope, before its receipt: the envelope file is the source of truth (a known id: no expiry check)
         if (contentHash(readJson<Envelope>(existing)) !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
         if (this.store.readIntent(e.id)) throw rule(`id ${e.id} belongs to a reply in progress; nothing written`);
         file = existing;

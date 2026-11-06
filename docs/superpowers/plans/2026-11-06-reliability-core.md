@@ -12,7 +12,7 @@
 - `sinkReplaySafe(to)` 由二号实现；core 以可选导入 + 本地兜底（file/hufu-report=true，其余 false）。幂等头 `x-wake-grokbot-delivery-id = reply.id`（二号）。
 - core：`attempt_started_at` 先于副作用落盘；unknown 不自动重发；watch/recover 只补 replaySafe 或明确 not_sent。
 - 人工补发：新命令 `redeliver <reply-id>`；状态 unknown 且 sink 非 replaySafe 时须 `--accept-duplicate-risk`，否则 exit 1 并说明风险。
-- P2 定稿：不新增 WakeState。过期策略（send/ingest/pump 一致）：新 id 已过期 → ingest exit 1 不写入（不变）；send 保持写入（兼容既有 expires.test 语义），但与入队后过期一样在 pump 前被拦下不唤醒（exit 5）；已知 id 幂等优先（0/7）；已入队条目在 pump 唤醒前若过期 → 移出队列、`wake.state=not_started`、detail `expired at …; not woken`，业务 status 不变（不视为失败）。
+- P2 定稿：不新增 WakeState。过期策略（send/ingest/pump 一致）：新 id 已过期 → send 与 ingest 均 exit 1，不写信封/receipt/队列（Lead 11-06 09:57 裁定；send 为契约修正）；已知 id 幂等优先（0/7）；已入队条目在 pump 唤醒前若过期 → 移出队列、`wake.state=not_started`、detail `expired at …; not woken`，业务 status 不变（不视为失败）。
 - P3：不改 fsutil。P4：故障注入仅 `EngineOptions.fault` 测试钩子，默认关，无环境变量。
 - P5：沿用退出码：交付 not_sent/unknown → 5（历史语义"已写入但未唤醒或 sink 失败"），冲突 7，规则拒 1。
 - 本轮不升版本、不加 sink 别名、不真实发送。
@@ -163,3 +163,14 @@ git diff --stat 16d0db0 -- src/sinks.ts src/config.ts src/envelope.ts schema exa
 - 回复意图文件 `state/pending-replies/<replyId>.json` 先于一切回复文件落盘；`Engine.recover()` 由 `watch` 每轮调用；`redeliver <reply-id> [--accept-duplicate-risk]`。
 - status 行加 ` report=<delivery.state>`；契约快照仅新增（help 一条命令；receipt `replies[].revision/delivery`、`last_revision`、`status_revision`）。
 - 二号对接：`ctx.delivery` 已传；SinkResult 的 `outcome/state` 被 `outcomeOf` 识别。
+
+## 11. 给二号的兼容文字（过期语义变更，Lead 11-06 09:57 裁定）
+- **变更**：`send` 现与 `ingest` 一致：新 id 且已过 `expires_at` → exit 1，`envelope expired at <t>; nothing written`，不落信封、receipt、队列。此前 `send` 会写入。
+- **不变**：已知 id（含崩溃后只剩信封文件的 id）先走幂等/冲突：同内容 0、异内容 7，不查过期；已 prune 的 id → 1。
+- **新增**：已接收、排队期间过期的条目在叫醒前移出队列，`wake.state=not_started`，detail `expired at <t>; not woken`，业务 `status` 不变（不是失败结论），exit 5（"已写入未唤醒"）。
+- 文档已同步：CHANGELOG 0.1.0 条目、docs/protocol.md、docs/engine-interface.md、docs/threat-model.md 中过期描述。README/安装文档未动。
+- 测试：expires.test.ts 两条改为"用注入时钟在过期前接收"，属契约修正。
+
+## 12. 整合时必须去掉静默兜底（待二号最终 SHA）
+- 只读核对 3ab5bf8 `src/sinks.ts` 导出：`SinkOutcome`、`SinkState`、`SinkResult{ok,detail,outcome?,state?}`、`SinkDelivery{taskId,replyHash,revision}`、`SinkContext.delivery?: SinkDelivery`、`sinkReplaySafe(to: ReplyTo): boolean`、`DELIVERY_ID_HEADER`、`STATE_FORMAT`、`DONE_FORMAT`、`deliver(reply,to,ctx)`。与冻结 v1 一致。
+- 整合时：`src/delivery.ts` 改为直接 `import { sinkReplaySafe, type SinkDelivery, type SinkOutcome, type SinkState } from "./sinks.js"`，`DeliveryContext = SinkDelivery`；删除可选反射与"旧 sink 推断 not_sent/unknown"兜底；`outcome` 缺失视为契约违反（按 unknown 并记日志），并加测试断言每次 core 调用的 SinkResult 都带 outcome。
