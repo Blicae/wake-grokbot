@@ -83,7 +83,7 @@ export const EXAMPLE_CONFIG = {
   },
   sinks: {
     file: { dir: "" },
-    webhooks: { "my-hook": { url_env: "MY_HOOK_URL", secret_env: "MY_HOOK_SECRET" } },
+    webhooks: {}, // add e.g. "my-hook": { url_env, secret_env } when you use the webhook sink
     commands: { "my-engine": { argv: ["my-engine", "ingest", "--from", "wake-grokbot", "-"], timeout_seconds: 60 } },
     report_roots: [],
   },

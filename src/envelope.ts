@@ -51,6 +51,9 @@ export interface Envelope {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** RFC 3339 date-time, the same rule as JSON Schema `format: date-time` (ajv-formats). */
+const DATE_TIME_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[T\s]([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?(Z|[+-]([01]\d|2[0-3])(:?[0-5]\d)?)$/i;
+const isDateTime = (v: unknown) => typeof v === "string" && DATE_TIME_RE.test(v);
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/i;
 const SECRETISH_RE = /(authorization\s*:|bearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(sk-|ghp_|xox[abprs]-|glpat-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
@@ -69,13 +72,11 @@ export function validate(x: unknown): string[] {
   if (typeof e.id !== "string" || !UUID_RE.test(e.id)) p.push("id must be a UUID");
   if (!TYPES.includes(e.type as EnvelopeType)) p.push(`type must be one of ${TYPES.join(", ")}`);
   for (const k of ["from", "to"]) if (typeof e[k] !== "string" || !NAME_RE.test(e[k] as string)) p.push(`${k} must be a short name`);
-  if (typeof e.sent_at !== "string" || Number.isNaN(Date.parse(e.sent_at))) p.push("sent_at must be an ISO 8601 time");
+  if (!isDateTime(e.sent_at)) p.push("sent_at must be an RFC 3339 date-time");
   for (const k of ["project", "title", "body", "objective", "quote", "thread", "question", "summary", "next", "sig"])
     if (e[k] !== undefined && typeof e[k] !== "string") p.push(`${k} must be a string`);
-  if (e.quoted_at !== undefined && (typeof e.quoted_at !== "string" || Number.isNaN(Date.parse(e.quoted_at))))
-    p.push("quoted_at must be an ISO 8601 time");
-  if (e.expires_at !== undefined && (typeof e.expires_at !== "string" || Number.isNaN(Date.parse(e.expires_at))))
-    p.push("expires_at must be an ISO 8601 time");
+  if (e.quoted_at !== undefined && !isDateTime(e.quoted_at)) p.push("quoted_at must be an RFC 3339 date-time");
+  if (e.expires_at !== undefined && !isDateTime(e.expires_at)) p.push("expires_at must be an RFC 3339 date-time");
   if (e.thread !== undefined && typeof e.thread === "string" && !UUID_RE.test(e.thread)) p.push("thread must be a UUID");
   if (e.acceptance !== undefined && (!Array.isArray(e.acceptance) || !e.acceptance.every((a) => typeof a === "string")))
     p.push("acceptance must be a list of strings");

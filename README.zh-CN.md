@@ -13,25 +13,25 @@
 ## 快速开始
 
 ```sh
-npx wake-grokbot init        # 生成示例配置和收件箱目录
+npx --yes wake-grokbot@0.1.0 init        # 生成示例配置和收件箱目录
 # 把例程的网址和密钥放进环境变量：WAKE_GROKBOT_URL、WAKE_GROKBOT_KEY
 # （不要写进配置，也不要写在命令行参数里）
-npx wake-grokbot doctor      # 自检，不打印任何密钥
-npx wake-grokbot guide       # 中文使用指引
+npx --yes wake-grokbot@0.1.0 doctor      # 自检，不打印任何密钥
+npx --yes wake-grokbot@0.1.0 guide       # 中文使用指引
 ```
 
 派活：
 
 ```sh
-npx wake-grokbot send --to worker --title "整理说明" --objective "把安装部分写清楚"
-npx wake-grokbot send --json < task.json
+npx --yes wake-grokbot@0.1.0 send --to worker --title "整理说明" --objective "把安装部分写清楚"
+npx --yes wake-grokbot@0.1.0 send --json < task.json
 ```
 
 干活：
 
 ```sh
-npx wake-grokbot ack <id>
-npx wake-grokbot reply <id> --status done --summary "已改好并验证" --body-file result.md
+npx --yes wake-grokbot@0.1.0 ack <id>
+npx --yes wake-grokbot@0.1.0 reply <id> --status done --summary "已改好并验证" --body-file result.md
 ```
 
 ## 命令

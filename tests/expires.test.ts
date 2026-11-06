@@ -16,7 +16,7 @@ async function acceptBefore(s: ReturnType<typeof sandbox>, e: Record<string, unk
 describe("expires_at (optional replay/staleness window)", () => {
   it("validator accepts an ISO time and rejects anything else", () => {
     expect(validate(fixture("task-expires.json"))).toEqual([]);
-    expect(validate(task({ expires_at: "tomorrow" })).join()).toMatch(/expires_at must be an ISO 8601 time/);
+    expect(validate(task({ expires_at: "tomorrow" })).join()).toMatch(/expires_at must be an RFC 3339 date-time/);
     expect(validate(task({ expires_at: 5 })).join()).toMatch(/expires_at/);
   });
   it("isExpired", () => {

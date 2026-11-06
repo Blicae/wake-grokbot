@@ -59,7 +59,7 @@ Rules the engine must follow:
   `"wake-envelope/1\n"` + canonical JSON); missing or wrong signatures exit 4.
 - No URLs and no secrets anywhere in the envelope (exit 1). Refer to configured names instead.
 - `report_path` is absolute, has no `..`, and lies inside a `report_roots` folder.
-- Optional `expires_at` (ISO 8601). `ingest` (and `send`) check the id first: an id it has already accepted follows the
+- Optional `expires_at` (RFC 3339 date-time, as `format: date-time` in the schema). `ingest` (and `send`) check the id first: an id it has already accepted follows the
   idempotency rules (same content → 0, different → 7) with no expiry check, so re-sending after expiry is safe.
   A new id that is already past `expires_at` is refused (exit 1, the same class as an invalid envelope; nothing is
   written). If it expires after it was accepted it is not woken (`wake: not_started`, `expired at …`, status
@@ -83,11 +83,33 @@ Statuses: `working`, `needs_input` (needs `--question`), `done`, `blocked`, `fai
 
 ## 4. Reporting completion: report file + `.DONE`
 
-For `reply_to.sink = "hufu-report"`, every reply rewrites the report and its marker, in this order:
+For `reply_to.sink = "hufu-report"` (report layout `wake-report/1`, marker format `wake-report-done/1`):
 
-1. remove any old `<report>.DONE`;
-2. write `<report>` atomically;
-3. write `<report>.DONE` atomically: `{"id":"<reply id>","status":"<status>","at":"<ISO time>"}`.
+1. take a per-path lock `<report>.lock` (records host, pid, process start time and a random token). A busy lock
+   fails the delivery with outcome `not_sent` (retryable). A lock is never taken over because of its age: it is
+   reclaimed only when its owner is provably gone (same host, pid no longer exists). A lock from another host, an
+   unreadable lock, or a live (or possibly reused) pid stays; **manual recovery**: make sure no wake-grokbot process
+   is delivering to that path, delete `<report>.lock`, and let core retry the same delivery;
+2. with a task delivery: write the intent `<report>.wake.json` (`wake-sink-state/1`, `phase: "intent"`: owner
+   `task_id`, `revision`, `reply_id`, `reply_hash`, `status`, expected `report_sha256`) **before** the report;
+3. remove any old `<report>.DONE`, then write `<report>` atomically (non-terminal statuses: this is the
+   current-progress view, no append log);
+4. with a task delivery: rewrite `<report>.wake.json` with `phase: "committed"`;
+5. terminal statuses (`done`, `failed`, `declined`) only: write `<report>.DONE` atomically:
+   `{"format":"wake-report-done/1","id":"<reply id>","task_id":"…","revision":N,"status":"<status>","reply_hash":"<sha256 of the reply envelope>","report_sha256":"<sha256 of the report bytes>","at":"<RFC 3339 time>"}`
+   (`task_id`, `revision`, `reply_hash` are present only when the caller passed a task delivery).
+
+Ordering with a task delivery: an older revision, or a non-terminal reply after a terminal one, is `superseded`
+(nothing written); the same revision with other content, a path owned by another task, or an existing unowned
+file is a `conflict`; the same revision and content is a `duplicate` only when the report and marker on disk
+match (`reply_id`, `status`, actual report bytes vs `report_sha256`, committed phase, and the marker), otherwise
+the same delivery repairs its own half-finished writes (any crash window: after intent, report, sidecar or
+marker). Files with no `.wake.json` owner are never overwritten. `reply_hash` and `report_sha256` are different values.
+
+**Migration (breaking for earlier development builds).** Before v1 every status wrote `.DONE` as
+`{"id","status","at"}`. Now `.DONE` appears only for terminal statuses and carries `format`. A reader that waited
+for `.DONE` on `needs_input`/`blocked` must poll the report (or `<report>.wake.json`) instead. Success means
+`status: "done"`; `failed` and `declined` are final but not success. Verify `report_sha256` against the report.
 
 Report file layout:
 
@@ -100,8 +122,8 @@ Report file layout:
 
 Status words: `working` 进展, `needs_input` 等待, `done` 就绪, `blocked` 受阻, `failed` 失败, `declined` 无需处理.
 
-The engine waits for `<report>.DONE`, then reads the report. A `.DONE` never points at a half-written report.
-Final states are `done`, `failed`, `declined`; on `needs_input` or `blocked` the engine may answer with a new envelope
+The engine waits for `<report>.DONE`, checks `format` and `report_sha256`, then reads the report. A `.DONE` never
+points at a half-written report. Final states are `done`, `failed`, `declined`; on `needs_input` or `blocked` the engine may answer with a new envelope
 in the same `thread`. The reply envelope also lands in `msg/to-dispatcher/unread/` and the task's receipt records
 `sink_result`. If the sink refuses (for example a path outside `report_roots`), `reply` exits 5 and no report or
 `.DONE` is written.
