@@ -23,7 +23,8 @@ Lead review and the frozen v1 interface. Coding is approved (TDD). Files owned b
 Further facts checked for this revision:
 - **Current `.DONE` content is JSON, not plain reply id text**: `{"id","status","at"}` (`sinks.ts:104`,
   documented in `docs/engine-interface.md:89`, asserted in `tests/sinks.test.ts:98`, `tests/report-loop.test.ts:44,60,63`).
-  Any "plain id" reader would already be broken; still, the v1 change below is **breaking** (see §4).
+  Correction to the audit note: the marker was already JSON `{id,status,at}`, not a plain reply id. The v1 change
+  below is still **breaking** for readers (see §4).
 - **Readers of `.DONE` in this repo**: none in `src/`; only tests and docs (`docs/engine-interface.md:83-106`,
   `docs/integrations.md:36-37`). External engines are the real readers.
 - **`deliver` is public**: `src/index.ts:7` re-exports it; `package.json` `main`/`exports` -> `dist/index.js`.
@@ -111,3 +112,19 @@ the old needs_input `.DONE` behavior. Fault injection only via test setup (pre-m
   at `core.ts:386`, record `outcome`/`state` in the receipt, decide resend scheduling and recovery (replay only if
   `sinkReplaySafe`, or outcome `not_sent`). Until then core uses the legacy path.
 - Expiry semantics/docs (一号). B6 gbmsg not in scope. No dependency upgrades, no release.
+
+## 8. Revision 3 (Lead review of 3ab5bf8)
+1. Webhook: `not_sent` only when provably unsent (pre-send validation failure, connection refused /
+   unresolvable with no HTTP status). Any non-2xx answer (3xx never followed, `redirect: "manual"` in `net.ts`;
+   4xx; 429; 5xx) or timeout is `unknown`, never auto-resent.
+2. Lock: owner record `{host, pid, started_at, token}`; reclaimed only when provably gone (same host, `kill(pid,0)`
+   = ESRCH, or our own pid with another start time); never by age; reclaim by rename-aside + token check.
+   Otherwise busy -> `not_sent`/`failed`, retryable, with a manual-recovery hint (documented in engine-interface §4).
+3. Crash windows: intent sidecar (phase `intent`, expected `report_sha256`) before the report; `committed` after;
+   duplicate requires reply_id, status, actual report bytes, committed phase and marker all consistent; otherwise
+   the same delivery repairs itself. Test-only `_testHooks.fault` (not exported from the package entry).
+4. Version pin strict: scripts refuse a global install whose `--version` differs from the pin.
+5. Types: sink types exported from `src/index.ts`; `sinkReplaySafe` stays internal to `sinks.ts`. No
+   `src/delivery.ts` exists on dev/0.1, dev/0.1-a or dev/0.1-b; `SinkDelivery` is structurally
+   `{taskId, replyHash, revision}` for alignment, no import between them.
+6. RFC 3339 wording for `sent_at`, `expires_at`, marker `at`; expiry policy unchanged.

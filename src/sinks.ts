@@ -1,6 +1,7 @@
 /** Reply sinks: where a worker's answer/receipt for a task is delivered, chosen per task by reply_to.sink. */
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { run } from "./channels/script.js";
 import type { Config } from "./config.js";
@@ -41,7 +42,16 @@ export interface SinkContext {
 export const STATE_FORMAT = "wake-sink-state/1";
 export const DONE_FORMAT = "wake-report-done/1";
 export const DELIVERY_ID_HEADER = "x-wake-grokbot-delivery-id";
-const LOCK_STALE_MS = 120_000;
+/** Identity of this process for lock ownership: host + pid + start time + a random token per lock. */
+const PROCESS_START = Math.round(Date.now() - process.uptime() * 1000);
+
+/** Write windows of a file/report delivery, in order. */
+export type WriteWindow = "intent" | "report" | "sidecar" | "marker";
+/**
+ * Test-only fault injection: not exported from the package entry (src/index.ts), not reachable from the CLI,
+ * config or environment. Tests set `fault` to throw (or block) right after a write window.
+ */
+export const _testHooks: { fault?: (after: WriteWindow) => void } = {};
 
 /** True when the sink can be replayed safely with the same delivery (file and report sinks are idempotent). */
 export function sinkReplaySafe(to: ReplyTo): boolean {
@@ -105,30 +115,74 @@ function parseMaybe(b: Buffer | undefined): Record<string, unknown> | undefined 
   }
 }
 
-/** Per-path lock: exclusive create, no waiting (busy = retryable failure); stale locks are broken. */
-function tryLock(target: string): (() => void) | undefined {
+interface LockOwner {
+  host: string;
+  pid: number;
+  started_at: number;
+  token: string;
+}
+
+/** Is the recorded owner provably gone? Only for a lock of this host whose pid no longer exists (or is reused by us). */
+function ownerGone(o: LockOwner): { gone: boolean; why: string } {
+  if (o.host !== os.hostname()) return { gone: false, why: `held on another host (${o.host})` };
+  if (o.pid === process.pid) return o.started_at === PROCESS_START ? { gone: false, why: "held by this process" } : { gone: true, why: "pid reused by this process" };
+  try {
+    process.kill(o.pid, 0);
+    return { gone: false, why: `pid ${o.pid} is alive (or reused; cannot prove it is gone)` };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code === "ESRCH" ? { gone: true, why: `pid ${o.pid} is gone` } : { gone: false, why: `pid ${o.pid} exists (${code})` };
+  }
+}
+
+/**
+ * Per-path lock: exclusive create, no waiting. Never stolen by age: reclaimed only when the owner is provably gone
+ * (same host, pid no longer exists). Otherwise busy, with a manual-recovery hint.
+ */
+function tryLock(target: string): { release: () => void } | { busy: string } {
   const lock = `${target}.lock`;
   fs.mkdirSync(path.dirname(lock), { recursive: true });
-  for (let i = 0; i < 2; i++) {
+  const me: LockOwner = { host: os.hostname(), pid: process.pid, started_at: PROCESS_START, token: randomUUID() };
+  const manual = `retryable; if no wake-grokbot process holds it, remove ${path.basename(lock)} manually`;
+  for (let i = 0; i < 3; i++) {
     try {
-      const token = `${process.pid}-${Date.now()}-${Math.random()}`;
-      fs.writeFileSync(lock, token + "\n", { flag: "wx" });
-      return () => {
-        if (readMaybe(lock)?.toString("utf8").startsWith(token)) fs.rmSync(lock, { force: true });
+      fs.writeFileSync(lock, JSON.stringify(me) + "\n", { flag: "wx" });
+      return {
+        release: () => {
+          const cur = parseMaybe(readMaybe(lock));
+          if (cur?.token === me.token) fs.rmSync(lock, { force: true });
+        },
       };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      let age: number;
-      try {
-        age = Date.now() - fs.statSync(lock).mtimeMs;
-      } catch {
-        continue;
-      }
-      if (age <= LOCK_STALE_MS) return undefined;
-      fs.rmSync(lock, { force: true });
     }
+    const raw = readMaybe(lock);
+    if (!raw) continue; // released meanwhile
+    const o = parseMaybe(raw) as LockOwner | undefined;
+    if (!o || typeof o.pid !== "number" || typeof o.host !== "string" || typeof o.token !== "string") return { busy: `lock is unreadable; ${manual}` };
+    const g = ownerGone(o);
+    if (!g.gone) return { busy: `locked (${g.why}); ${manual}` };
+    // reclaim atomically: move the dead owner's lock aside, then confirm it was really that one
+    const aside = `${lock}.stale-${me.token}`;
+    try {
+      fs.renameSync(lock, aside);
+    } catch {
+      continue;
+    }
+    const moved = parseMaybe(readMaybe(aside));
+    if (moved?.token === o.token) {
+      fs.rmSync(aside, { force: true });
+      continue;
+    }
+    try {
+      fs.linkSync(aside, lock); // someone else's fresh lock: put it back (never overwrites)
+    } catch {
+      /* a new lock exists already */
+    }
+    fs.rmSync(aside, { force: true });
+    return { busy: `lock changed while reclaiming; ${manual}` };
   }
-  return undefined;
+  return { busy: `lock is contended; ${manual}` };
 }
 
 interface Target {
@@ -141,12 +195,15 @@ interface Target {
 
 /**
  * Write a target with ordering, ownership and idempotency checks against `<file>.wake.json` (when ctx.delivery
- * is set), under a per-path lock. Write order: remove marker (terminal) -> file -> state -> marker (terminal).
+ * is set), under a per-path lock. Write windows, in order: intent (state, phase "intent", expected report hash)
+ * -> report (old marker removed first) -> sidecar (state, phase "committed") -> marker (terminal only).
+ * A retry of the same delivery repairs its own half-finished writes; unowned files are never overwritten.
  */
 function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
-  const unlock = tryLock(t.file);
-  if (!unlock) return notSent(`${t.label}: target is locked by another delivery; retryable`, "failed");
+  const lk = tryLock(t.file);
+  if ("busy" in lk) return notSent(`${t.label}: ${lk.busy}`, "failed");
   let touched = false;
+  const hook = (w: WriteWindow) => _testHooks.fault?.(w);
   try {
     const d = ctx.delivery;
     const stateFile = `${t.file}.wake.json`;
@@ -155,11 +212,12 @@ function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
     const st = parseMaybe(readMaybe(stateFile));
     const existing = readMaybe(t.file);
     const bytes = Buffer.from(t.content, "utf8");
-    const legacy = (extra: Partial<SinkResult> = {}) => ({ ...extra });
+    const fileHash = sha256(bytes);
+    const assoc = d ? { task_id: d.taskId, revision: d.revision, reply_hash: d.replyHash } : {};
     if (!d) {
       if (st || fs.existsSync(stateFile)) return notSent(`${t.label}: target is owned by a task delivery; legacy call refused`);
     } else {
-      if (!st && (existing || fs.existsSync(done))) return notSent(`${t.label}: target exists and is not owned by this delivery`, "conflict");
+      if (!st && (existing || fs.existsSync(done) || fs.existsSync(stateFile))) return notSent(`${t.label}: target exists and is not owned by this delivery`, "conflict");
       if (st && st.format !== STATE_FORMAT) return notSent(`${t.label}: unknown state format`, "conflict");
       if (st) {
         if (st.task_id !== d.taskId) return notSent(`${t.label}: target belongs to another task`, "conflict");
@@ -167,28 +225,39 @@ function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
         if (d.revision < rev) return { ok: true, outcome: "not_sent", state: "superseded", detail: `${t.label}: revision ${d.revision} superseded by ${rev}` };
         if (d.revision === rev) {
           if (st.reply_hash !== d.replyHash) return notSent(`${t.label}: same revision ${rev} with different content`, "conflict");
-          const fileOk = !!existing && sha256(existing) === st.report_sha256;
+          const onDisk = existing ? sha256(existing) : "";
           const m = parseMaybe(readMaybe(done));
-          const markerOk = !t.marker || !terminal || (!!m && m.format === DONE_FORMAT && m.task_id === d.taskId && m.reply_hash === d.replyHash && m.revision === rev && m.report_sha256 === st.report_sha256);
-          if (fileOk && markerOk) return { ok: true, outcome: "delivered", state: "duplicate", detail: `${t.label}: already delivered` };
+          const markerOk = !t.marker
+            ? true
+            : terminal
+              ? !!m && m.format === DONE_FORMAT && m.id === reply.id && m.status === reply.status && m.task_id === d.taskId && m.revision === rev && m.reply_hash === d.replyHash && m.report_sha256 === fileHash
+              : !fs.existsSync(done);
+          const consistent = st.phase === "committed" && st.reply_id === reply.id && st.status === reply.status && st.report_sha256 === fileHash && onDisk === fileHash && markerOk;
+          if (consistent) return { ok: true, outcome: "delivered", state: "duplicate", detail: `${t.label}: already delivered` };
+          // else: our own delivery, half finished or damaged: repair below
         } else if (isTerminal(st.status as Envelope["status"]) && !terminal) {
           return { ok: true, outcome: "not_sent", state: "superseded", detail: `${t.label}: terminal state is kept` };
         }
       }
     }
     touched = true;
+    const record = (phase: string) => JSON.stringify({ format: STATE_FORMAT, ...assoc, reply_id: reply.id, status: reply.status, report_sha256: fileHash, phase }) + "\n";
+    if (d) atomicWrite(stateFile, record("intent"));
+    hook("intent");
     if (t.marker) fs.rmSync(done, { force: true }); // a stale marker must never point at a half-written report
     atomicWrite(t.file, bytes);
-    const fileHash = sha256(bytes);
-    const assoc = d ? { task_id: d.taskId, revision: d.revision, reply_hash: d.replyHash } : {};
-    if (d) atomicWrite(stateFile, JSON.stringify({ format: STATE_FORMAT, ...assoc, reply_id: reply.id, status: reply.status, report_sha256: fileHash }) + "\n");
-    if (t.marker && terminal)
+    hook("report");
+    if (d) atomicWrite(stateFile, record("committed"));
+    hook("sidecar");
+    if (t.marker && terminal) {
       atomicWrite(done, JSON.stringify({ format: DONE_FORMAT, id: reply.id, ...assoc, status: reply.status, report_sha256: fileHash, at: new Date().toISOString() }) + "\n");
-    return { ok: true, outcome: "delivered", ...(d ? { state: "delivered" as const } : legacy()), detail: t.label };
+      hook("marker");
+    }
+    return { ok: true, outcome: "delivered", ...(d ? { state: "delivered" as const } : {}), detail: t.label };
   } catch (e) {
     return { ok: false, outcome: touched ? "unknown" : "not_sent", ...(ctx.delivery ? { state: "failed" as const } : {}), detail: mask(`${t.label}: ${(e as Error).message}`) };
   } finally {
-    unlock();
+    lk.release();
   }
 }
 
@@ -216,7 +285,10 @@ async function webhookSink(reply: Envelope, to: ReplyTo, ctx: SinkContext): Prom
   const ts = String(Math.floor(Date.now() / 1000));
   // the delivery id lets a receiver spot repeats; it is not a server-side idempotency guarantee
   const r = await postJson(url, reply, { [SIGNATURE_HEADER]: webhookSignature(secret, ts, body), [TIMESTAMP_HEADER]: ts, [DELIVERY_ID_HEADER]: reply.id }, ctx.timeoutMs);
-  const outcome: SinkOutcome = r.state === "started" ? "delivered" : r.state === "not_started" ? "not_sent" : "unknown";
+  // not_sent only when provably nothing reached the peer (connection refused/unresolvable before any byte, no HTTP
+  // status). Any HTTP answer other than 2xx (3xx is never followed, 4xx, 429, 5xx) or a timeout: the peer may have
+  // acted, so the outcome is unknown and must not be resent automatically.
+  const outcome: SinkOutcome = r.state === "started" ? "delivered" : r.state === "not_started" && r.status === undefined ? "not_sent" : "unknown";
   return { ok: r.state === "started", outcome, detail: `webhook ${to.url_ref}: ${r.detail}` };
 }
 

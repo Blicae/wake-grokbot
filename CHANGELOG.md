@@ -17,10 +17,13 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
   `status: "done"` as success. Optional `ctx.delivery` (task id, reply hash, revision) adds per-path locking,
   ownership (`<target>.wake.json`), revision ordering (`superseded`), `duplicate`/`conflict` detection and marker
   recovery; results carry `outcome` (`delivered`/`not_sent`/`unknown`) and, for file/report sinks, `state`.
-  `sinkReplaySafe()` exported. Webhooks send `X-Wake-Grokbot-Delivery-Id`.
+  Per-path lock with owner identity (host, pid, process start, token), never stolen by age; delivery intent
+  written before the report so a retry repairs its own crash windows. Webhook: only a provably unsent request
+  is `not_sent`; any non-2xx answer or timeout is `unknown`. Sink types (`SinkContext`, `SinkDelivery`,
+  `SinkResult`, `SinkOutcome`, `SinkState`) are exported from the package entry. Webhooks send `X-Wake-Grokbot-Delivery-Id`.
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
-- Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`.
+- Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`; a global install of another version is refused, never used.
 - Agent skill at `skills/wake-grokbot/SKILL.md`.
 - `release`, `prune`, `doctor --dry-run`, JSON log lines, target `description`/`capabilities`, `send --id/--thread`.
 - Config discovery order (`--config`, `$WAKE_GROKBOT_CONFIG`, `./wake-grokbot.json`, user folder); errors name the config and the paths searched.

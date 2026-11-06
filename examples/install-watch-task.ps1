@@ -20,6 +20,11 @@ if (-not $Config) { throw "Pass -Config <path to wake-grokbot.json> (explicit co
 $Config = (Resolve-Path $Config).Path
 $cmd = Get-Command wake-grokbot -ErrorAction SilentlyContinue
 if ($cmd) {
+  # A global install is used only when it is exactly the pinned version; a different version is an error.
+  $have = (& $cmd.Source --version 2>$null | Out-String).Trim()
+  if ($have -ne $Version) {
+    throw "global wake-grokbot is '$have', pinned version is $Version; install wake-grokbot@$Version or remove the global one"
+  }
   $exe = $cmd.Source
   $watchArgs = "--config `"$Config`" watch --once"
 } else {

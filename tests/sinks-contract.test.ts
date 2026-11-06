@@ -141,7 +141,7 @@ describe("replay safety and outcomes", () => {
     expect(sinkReplaySafe({ sink: "webhook", url_ref: "h" })).toBe(false);
     expect(sinkReplaySafe({ sink: "command", command_ref: "c" })).toBe(false);
   });
-  it("webhook: delivery-id header; 2xx delivered, 4xx not_sent, 5xx unknown; missing config not_sent", async () => {
+  it("webhook: delivery-id header; 2xx delivered, 4xx and 5xx unknown; missing config not_sent", async () => {
     let code = 200;
     const srv = await stub(() => ({ status: code }));
     const s = setup({ webhooks: { h: { url_env: "U", secret_env: "S" } } }, { U: srv.url, S: "secret-value-123" });
@@ -150,7 +150,7 @@ describe("replay safety and outcomes", () => {
     expect(await s.send(r, 1, TASK, to)).toMatchObject({ ok: true, outcome: "delivered" });
     expect(srv.hits[0]!.headers["x-wake-grokbot-delivery-id"]).toBe(r.id);
     code = 404;
-    expect(await s.send(r, 1, TASK, to)).toMatchObject({ ok: false, outcome: "not_sent" });
+    expect(await s.send(r, 1, TASK, to)).toMatchObject({ ok: false, outcome: "unknown" }); // the peer saw the request
     code = 503;
     expect(await s.send(r, 1, TASK, to)).toMatchObject({ ok: false, outcome: "unknown" });
     expect(await s.send(r, 1, TASK, { sink: "webhook", url_ref: "nope" })).toMatchObject({ ok: false, outcome: "not_sent" });

@@ -41,7 +41,9 @@ Exit 6 means "written, wake outcome unknown": the engine must not resend; it can
 - `{"sink": "webhook", "url_ref": "my-hook"}`: POSTs the reply. Headers `X-Wake-Grokbot-Timestamp` and
   `X-Wake-Grokbot-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>`. Verify both and reject
   old timestamps. `X-Wake-Grokbot-Delivery-Id: <reply id>` helps a receiver spot repeats; it is not a
-  server-side idempotency guarantee.
+  server-side idempotency guarantee. Outcome: 2xx delivered; connection refused or unresolvable before any byte
+  was sent: not sent; any other HTTP answer (redirects are never followed, 4xx, 429, 5xx) or a timeout: unknown,
+  because the receiver may have acted. Unknown is never resent automatically.
 - `{"sink": "file"}`: writes the reply envelope into the reply folder.
 
 The receipt records the sink result. If delivery fails, `reply` exits 5; the reply itself is still in the inbox.

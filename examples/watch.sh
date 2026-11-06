@@ -27,7 +27,13 @@ set -eu
 # Pinned version and explicit config (override with WAKE_GROKBOT_VERSION / WAKE_GROKBOT_CONFIG).
 VERSION="${WAKE_GROKBOT_VERSION:-0.1.0}"
 CONFIG="${WAKE_GROKBOT_CONFIG:-$HOME/.config/wake-grokbot/wake-grokbot.json}"
+# A global install is used only when it is exactly the pinned version; a different version is an error.
 if command -v wake-grokbot >/dev/null 2>&1; then
+  HAVE="$(wake-grokbot --version 2>/dev/null || true)"
+  if [ "$HAVE" != "$VERSION" ]; then
+    echo "watch.sh: global wake-grokbot is '$HAVE', pinned version is $VERSION; install wake-grokbot@$VERSION or remove the global one" >&2
+    exit 2
+  fi
   exec wake-grokbot --config "$CONFIG" watch --once
 else
   exec npx --yes "wake-grokbot@$VERSION" --config "$CONFIG" watch --once
