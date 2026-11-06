@@ -51,13 +51,13 @@ describe("report file + .DONE loop (public fixture task-hufu-report.json)", () =
     expect(back).toMatchObject({ type: "receipt", from: "worker", to: "my-engine", status: "done", thread: e.id });
   });
 
-  it("needs_input writes `等待：` plus a decision line; a later done replaces report and .DONE", async () => {
+  it("needs_input writes `等待：` plus a decision line; no .DONE for a non-terminal status; a later failed writes report and .DONE", async () => {
     const { s, e, report } = setup();
     await s.run(["ingest", "--from", "my-engine", "-"], JSON.stringify(e));
     const q = await s.run(["reply", e.id, "--status", "needs_input", "--summary", "which log?", "--question", "nightly or release?"]);
     expect(q.code).toBe(0);
     expect(fs.readFileSync(report, "utf8").split("\n").slice(0, 2)).toEqual(["等待：which log?", "待人工决定：nightly or release?"]);
-    expect(JSON.parse(fs.readFileSync(report + ".DONE", "utf8")).status).toBe("needs_input");
+    expect(fs.existsSync(report + ".DONE")).toBe(false); // v1: only terminal statuses write the marker
     expect((await s.run(["reply", e.id, "--status", "failed", "--summary", "log missing"])).code).toBe(0);
     expect(fs.readFileSync(report, "utf8").split("\n")[0]).toBe("失败：log missing");
     expect(JSON.parse(fs.readFileSync(report + ".DONE", "utf8")).status).toBe("failed");

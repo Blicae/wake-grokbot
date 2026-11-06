@@ -4,7 +4,7 @@ Follow these steps on the user's computer. Report progress as "Step N of 6". Sto
 step needs a secret: **you never see, type, print or store the webhook URL or key yourself.**
 
 1. **Check Node.** Run `node --version`. Need 22 or newer. If missing, ask the user to install Node.js LTS.
-2. **Install.** `npm install -g wake-grokbot` (or use `npx wake-grokbot` for every command below).
+2. **Install.** `npm install -g wake-grokbot@0.1.0` (pin the version; or use `npx --yes wake-grokbot@0.1.0` for every command below). Scheduled runs pass an explicit `--config <file>`.
 3. **Create config and inbox.** `wake-grokbot init`. It prints the config path, inbox and state folder.
 4. **Secrets, done by the user.** Ask the user to store the routine's webhook URL and sender key as
    environment variables (names only go in the config). Windows, user level:

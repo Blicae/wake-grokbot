@@ -10,7 +10,7 @@
 #     [Service]
 #     Type=oneshot
 #     EnvironmentFile=%h/.config/wake-grokbot/env
-#     ExecStart=/usr/bin/env npx --yes wake-grokbot watch --once
+#     ExecStart=/usr/bin/env npx --yes wake-grokbot@0.1.0 --config %h/.config/wake-grokbot/wake-grokbot.json watch --once
 #   ~/.config/systemd/user/wake-grokbot-watch.timer
 #     [Timer]
 #     OnBootSec=2min
@@ -19,13 +19,16 @@
 #     WantedBy=timers.target
 #   systemctl --user enable --now wake-grokbot-watch.timer
 #
-# launchd (macOS): a LaunchAgent with ProgramArguments = [npx, --yes, wake-grokbot, watch, --once]
+# launchd (macOS): a LaunchAgent with ProgramArguments = [npx, --yes, wake-grokbot@0.1.0, --config, <config file>, watch, --once]
 # and StartInterval = 300.
 #
 # Or run it in the foreground: wake-grokbot watch --interval 300
 set -eu
+# Pinned version and explicit config (override with WAKE_GROKBOT_VERSION / WAKE_GROKBOT_CONFIG).
+VERSION="${WAKE_GROKBOT_VERSION:-0.1.0}"
+CONFIG="${WAKE_GROKBOT_CONFIG:-$HOME/.config/wake-grokbot/wake-grokbot.json}"
 if command -v wake-grokbot >/dev/null 2>&1; then
-  exec wake-grokbot watch --once
+  exec wake-grokbot --config "$CONFIG" watch --once
 else
-  exec npx --yes wake-grokbot watch --once
+  exec npx --yes "wake-grokbot@$VERSION" --config "$CONFIG" watch --once
 fi

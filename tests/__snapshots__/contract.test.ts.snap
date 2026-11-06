@@ -93,12 +93,7 @@ exports[`CLI contract > doctor without wake targets; init --print-config 2`] = `
     "file": {
       "dir": ""
     },
-    "webhooks": {
-      "my-hook": {
-        "url_env": "MY_HOOK_URL",
-        "secret_env": "MY_HOOK_SECRET"
-      }
-    },
+    "webhooks": {},
     "commands": {
       "my-engine": {
         "argv": [

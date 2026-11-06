@@ -10,6 +10,17 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Grok Bot wake channel: Bearer key, summary-only payload, redirects refused, rate caps, outbox with backoff and a dead state, coalescing, kill switch.
 - Generic `script` wake channel.
 - Reply sinks: `file`, `webhook` (HMAC-SHA256), `command`, `hufu-report` (report file plus `.DONE` marker).
+- Sinks contract v1 (unreleased 0.1, **breaking for `.DONE` readers** of earlier development builds): `.DONE` is
+  written only for terminal statuses (`done`, `failed`, `declined`), never for `working`/`needs_input`/`blocked`;
+  its format is now `wake-report-done/1` (`format`, `id`, `status`, `at`, plus `task_id`, `revision`, `reply_hash`,
+  `report_sha256` when the caller passes a task delivery). Readers must check `format` and treat only
+  `status: "done"` as success. Optional `ctx.delivery` (task id, reply hash, revision) adds per-path locking,
+  ownership (`<target>.wake.json`), revision ordering (`superseded`), `duplicate`/`conflict` detection and marker
+  recovery; results carry `outcome` (`delivered`/`not_sent`/`unknown`) and, for file/report sinks, `state`.
+  `sinkReplaySafe()` exported. Webhooks send `X-Wake-Grokbot-Delivery-Id`.
+- Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
+- The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
+- Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`.
 - Agent skill at `skills/wake-grokbot/SKILL.md`.
 - `release`, `prune`, `doctor --dry-run`, JSON log lines, target `description`/`capabilities`, `send --id/--thread`.
 - Config discovery order (`--config`, `$WAKE_GROKBOT_CONFIG`, `./wake-grokbot.json`, user folder); errors name the config and the paths searched.

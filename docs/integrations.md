@@ -33,13 +33,15 @@ Exit 6 means "written, wake outcome unknown": the engine must not resend; it can
 - `{"sink": "hufu-report", "report_path": "/abs/path/reports/T-1.md"}`: a **Hufu-style report file**.
   The first line starts with a status word (进展, 等待, 就绪, 受阻, 失败, 无需处理) followed by the summary.
   For `needs_input` the second line is `待人工决定：<question>`. Then a blank line and the reply body.
-  The report is written atomically, and only then `<report>.DONE` is created (atomically), so a watcher
-  that waits for `.DONE` never sees a half-written report. `report_path` must be inside one of
-  `sinks.report_roots`.
+  The report is written atomically. Only terminal statuses (`done`, `failed`, `declined`) then create
+  `<report>.DONE` (format `wake-report-done/1`, see engine-interface §4); non-terminal replies only update the
+  report as a current-progress view. `.DONE` alone is not success: check its `status` (`done` only) and
+  `report_sha256`. `report_path` must be absolute and inside one of `sinks.report_roots`; it is never remapped.
 - `{"sink": "command", "command_ref": "my-engine"}`: runs the configured command with the reply envelope on stdin.
 - `{"sink": "webhook", "url_ref": "my-hook"}`: POSTs the reply. Headers `X-Wake-Grokbot-Timestamp` and
   `X-Wake-Grokbot-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>`. Verify both and reject
-  old timestamps.
+  old timestamps. `X-Wake-Grokbot-Delivery-Id: <reply id>` helps a receiver spot repeats; it is not a
+  server-side idempotency guarantee.
 - `{"sink": "file"}`: writes the reply envelope into the reply folder.
 
 The receipt records the sink result. If delivery fails, `reply` exits 5; the reply itself is still in the inbox.
