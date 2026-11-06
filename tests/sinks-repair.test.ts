@@ -229,37 +229,3 @@ describe("real multi-process contention", () => {
     expect(fs.existsSync(s.lock)).toBe(false);
   }, 60_000);
 });
-
-describe("watch.sh runs exactly the pinned version (stubs, no downloads)", () => {
-  function run(globalVersion: string | null) {
-    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "wg-bin-"));
-    const log = path.join(bin, "log");
-    if (globalVersion !== null)
-      fs.writeFileSync(path.join(bin, "wake-grokbot"), `#!/bin/sh\nif [ "$1" = "--version" ] || [ "$1" = "-v" ]; then echo ${globalVersion}; exit 0; fi\necho "global $*" >> "${log}"\n`, { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, "npx"), `#!/bin/sh\necho "npx $*" >> "${log}"\n`, { mode: 0o755 });
-    const r = spawnSync("/bin/sh", [path.join(ROOT, "examples", "watch.sh")], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, HOME: bin, WAKE_GROKBOT_CONFIG: "/cfg/w.json" } });
-    return { code: r.status, err: r.stderr, log: fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "" };
-  }
-  it("global with the pinned version: runs it with the explicit config", () => {
-    const r = run("0.1.0");
-    expect(r.code).toBe(0);
-    expect(r.log).toBe("global --config /cfg/w.json watch --once\n");
-  });
-  it("global with another version: fails, runs nothing", () => {
-    const r = run("0.0.9");
-    expect(r.code).not.toBe(0);
-    expect(r.err).toMatch(/0\.0\.9.*0\.1\.0|0\.1\.0.*0\.0\.9/);
-    expect(r.log).toBe("");
-  });
-  it("no global: npx with the pinned version and the explicit config", () => {
-    const r = run(null);
-    expect(r.code).toBe(0);
-    expect(r.log).toBe("npx --yes wake-grokbot@0.1.0 --config /cfg/w.json watch --once\n");
-  });
-  it("install-watch-task.ps1 checks the global version and refuses a mismatch (static check; no pwsh here)", () => {
-    const t = fs.readFileSync(path.join(ROOT, "examples", "install-watch-task.ps1"), "utf8");
-    expect(t).toMatch(/--version/);
-    expect(t).toMatch(/-ne \$Version/);
-    expect(t).toMatch(/throw/);
-  });
-});

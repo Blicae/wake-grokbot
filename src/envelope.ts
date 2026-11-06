@@ -105,7 +105,10 @@ export function validate(x: unknown): string[] {
     const ref = t && typeof t === "object" ? (t.ref as Record<string, unknown> | undefined) : undefined;
     if (!t || typeof t !== "object" || (ref !== undefined && (typeof ref !== "object" || ref === null)))
       p.push("task.ref must be an object");
-    else if (ref) for (const k of Object.keys(ref)) if (!["ticket_id", "card_path"].includes(k) || typeof ref[k] !== "string") p.push(`task.ref.${k} invalid`);
+    else {
+      for (const k of Object.keys(t)) if (k !== "ref") p.push(`unknown field: task.${k}`);
+      if (ref) for (const k of Object.keys(ref)) if (!["ticket_id", "card_path"].includes(k) || typeof ref[k] !== "string") p.push(`task.ref.${k} invalid`);
+    }
   }
   // content rules: envelopes carry no URLs and no secrets (config names only)
   const text = JSON.stringify({ ...e, sig: undefined });

@@ -1,12 +1,11 @@
 /** Reply sinks: where a worker's answer/receipt for a task is delivered, chosen per task by reply_to.sink. */
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { run } from "./channels/script.js";
 import type { Config } from "./config.js";
 import { type Envelope, isTerminal, REPORT_WORDS, type ReplyTo } from "./envelope.js";
-import { atomicWrite, isInside } from "./fsutil.js";
+import { atomicWrite, isInside, tryLock } from "./fsutil.js";
 import { postJson, resolveUrl } from "./net.js";
 import { mask, registerSecret } from "./secrets.js";
 
@@ -42,16 +41,13 @@ export interface SinkContext {
 export const STATE_FORMAT = "wake-sink-state/1";
 export const DONE_FORMAT = "wake-report-done/1";
 export const DELIVERY_ID_HEADER = "x-wake-grokbot-delivery-id";
-/** Identity of this process for lock ownership: host + pid + start time + a random token per lock. */
-const PROCESS_START = Math.round(Date.now() - process.uptime() * 1000);
-
 /** Write windows of a file/report delivery, in order. */
 export type WriteWindow = "intent" | "report" | "sidecar" | "marker";
 /**
  * Test-only fault injection: not exported from the package entry (src/index.ts), not reachable from the CLI,
  * config or environment. Tests set `fault` to throw (or block) right after a write window.
  */
-export const _testHooks: { fault?: (after: WriteWindow) => void; lockReclaim?: (phase: "checked") => void } = {};
+export const _testHooks: { fault?: (after: WriteWindow) => void } = {};
 
 /** True when the sink can be replayed safely with the same delivery (file and report sinks are idempotent). */
 export function sinkReplaySafe(to: ReplyTo): boolean {
@@ -115,76 +111,6 @@ function parseMaybe(b: Buffer | undefined): Record<string, unknown> | undefined 
   }
 }
 
-interface LockOwner {
-  host: string;
-  pid: number;
-  started_at: number;
-  token: string;
-}
-
-/** Is the recorded owner provably gone? Only for a lock of this host whose pid no longer exists (or is reused by us). */
-function ownerGone(o: LockOwner): { gone: boolean; why: string } {
-  if (o.host !== os.hostname()) return { gone: false, why: `held on another host (${o.host})` };
-  if (o.pid === process.pid) return o.started_at === PROCESS_START ? { gone: false, why: "held by this process" } : { gone: true, why: "pid reused by this process" };
-  try {
-    process.kill(o.pid, 0);
-    return { gone: false, why: `pid ${o.pid} is alive (or reused; cannot prove it is gone)` };
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    return code === "ESRCH" ? { gone: true, why: `pid ${o.pid} is gone` } : { gone: false, why: `pid ${o.pid} exists (${code})` };
-  }
-}
-
-/**
- * Per-path lock: exclusive create, no waiting. Never stolen by age: reclaimed only when the owner is provably gone
- * (same host, pid no longer exists). Otherwise busy, with a manual-recovery hint.
- */
-function tryLock(target: string): { release: () => void } | { busy: string } {
-  const lock = `${target}.lock`;
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-  const me: LockOwner = { host: os.hostname(), pid: process.pid, started_at: PROCESS_START, token: randomUUID() };
-  const manual = `retryable; if no wake-grokbot process holds it, remove ${path.basename(lock)} manually`;
-  for (let i = 0; i < 3; i++) {
-    try {
-      fs.writeFileSync(lock, JSON.stringify(me) + "\n", { flag: "wx" });
-      return {
-        release: () => {
-          const cur = parseMaybe(readMaybe(lock));
-          if (cur?.token === me.token) fs.rmSync(lock, { force: true });
-        },
-      };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    }
-    const raw = readMaybe(lock);
-    if (!raw) continue; // released meanwhile
-    const o = parseMaybe(raw) as LockOwner | undefined;
-    if (!o || typeof o.pid !== "number" || typeof o.host !== "string" || typeof o.token !== "string") return { busy: `lock is unreadable; ${manual}` };
-    const g = ownerGone(o);
-    if (!g.gone) return { busy: `locked (${g.why}); ${manual}` };
-    _testHooks.lockReclaim?.("checked");
-    // Reclaim under a separate reclaim mutex, never by moving the lock: the lock is only removed by its owner or by
-    // a reclaimer holding `<lock>.reclaim`, so re-checking the token under that mutex proves the file we remove is
-    // still the dead owner's (a fresh live lock can never be moved or removed). A stuck reclaim mutex is never
-    // stolen either: manual recovery.
-    const reclaim = `${lock}.reclaim`;
-    try {
-      fs.writeFileSync(reclaim, JSON.stringify(me) + "\n", { flag: "wx" });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      return { busy: `lock is being reclaimed (${path.basename(reclaim)}); ${manual} and ${path.basename(reclaim)}` };
-    }
-    try {
-      const again = parseMaybe(readMaybe(lock));
-      if (again && again.token === o.token) fs.rmSync(lock, { force: true });
-      else if (again) return { busy: `locked by a new owner; ${manual}` };
-    } finally {
-      if (parseMaybe(readMaybe(reclaim))?.token === me.token) fs.rmSync(reclaim, { force: true });
-    }
-  }
-  return { busy: `lock is contended; ${manual}` };
-}
-
 interface Target {
   file: string;
   content: string;
@@ -200,7 +126,7 @@ interface Target {
  * A retry of the same delivery repairs its own half-finished writes; unowned files are never overwritten.
  */
 function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
-  const lk = tryLock(t.file);
+  const lk = tryLock(`${t.file}.lock`);
   if ("busy" in lk) return notSent(`${t.label}: ${lk.busy}`, "failed");
   let touched = false;
   const hook = (w: WriteWindow) => _testHooks.fault?.(w);

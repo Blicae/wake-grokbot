@@ -36,6 +36,12 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Reliability core (B3/B5 + expiry): business status is separate from sink delivery state; `send`/`ingest` both refuse a new expired id (exit 1, nothing written); recover never auto-resends webhook/command with unknown outcome; `status` prints `report=<delivery>` beside `status=done` so a pending/unknown/conflict report is never masked. Core calls the real `sinkReplaySafe` / `outcome` path (no optional import fallback); a missing `outcome` is a contract violation recorded as `unknown`.
 - Lock recovery note: a busy or unreadable per-path lock fails as `not_sent` with a basename-only hint (`<report>.lock`); wake-grokbot never deletes an unknown or live lock automatically.
 - Windows: the SIGKILL-based "dead lock holder is reclaimed / live holder is not stolen" case is skipped on win32 (`it.skipIf(process.platform === "win32")`); an alternate Windows verification is still pending.
+- State lock (`state.lock`) and sink locks share one primitive (`fsutil.tryLock`/`withLock`, format `wake-lock/1`:
+  host, pid, token): never broken by age; reclaimed only when the owner is provably gone (same host, pid no longer
+  exists) under a `.reclaim` mutex with a token re-check; this process's own pid always counts as alive. A lock in
+  the old `<token> <pid>` format, from another host or unreadable is never removed automatically: `state lock busy`
+  (exit 3 as before) with a manual-recovery hint. This is a compatibility change: an old-format lock is no longer cleared for you. Before removing any lock by hand, stop every wake-grokbot process (and scheduled watch) that uses this state dir and confirm the owner host/pid recorded in the lock is gone; never delete a lock whose owner may still be alive, as that allows concurrent writes.
+- `task` objects reject unknown keys at runtime (`unknown field: task.<key>`), like the schema.
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
 - Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`; a global install of another version is refused, never used.
