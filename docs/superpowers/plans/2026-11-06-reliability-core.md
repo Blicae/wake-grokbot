@@ -5,6 +5,18 @@
 - 性质：仅计划；本提交不改任何实现。行号均相对基线 SHA。
 - 负责：一号（core/store/main/core 测试）。`sinks.ts`/`config.ts`/`envelope.ts`/schema/示例/包版本文档归二号（B4）。B6 迁移不做；真实发送/发版仅 Lead。
 
+## 0. 以 RD-001-G 接口冻结 v1 为准（覆盖下文冲突处）
+- `deliver(reply, to, ctx)` 不变；core 传 `ctx.delivery = { taskId, replyHash, revision }`（类型 `DeliveryContext` 由一号在 `src/delivery.ts` 导出，二号 import）。
+- `revision`：core 锁内按任务持久分配单调递增整数（task receipt `last_revision`），补发沿用原值；task/reply/hash/revision 写入意图文件 `state/pending-replies/<replyId>.json` 后才可能调 sink。
+- `SinkResult` 加 `outcome?: delivered|not_sent|unknown`、`state?: delivered|duplicate|superseded|conflict|failed`；duplicate/superseded 视为已安全处理（不重投）。旧回复补发不得回退业务终态（status 仅当 revision > status_revision 才更新）。
+- `sinkReplaySafe(to)` 由二号实现；core 以可选导入 + 本地兜底（file/hufu-report=true，其余 false）。幂等头 `x-wake-grokbot-delivery-id = reply.id`（二号）。
+- core：`attempt_started_at` 先于副作用落盘；unknown 不自动重发；watch/recover 只补 replaySafe 或明确 not_sent。
+- 人工补发：新命令 `redeliver <reply-id>`；状态 unknown 且 sink 非 replaySafe 时须 `--accept-duplicate-risk`，否则 exit 1 并说明风险。
+- P2 定稿：不新增 WakeState。过期策略（send/ingest/pump 一致）：新 id 已过期 → send/ingest 均 exit 1 不写入（send 为行为变更）；已知 id 幂等优先（0/7）；已入队条目在 pump 唤醒前若过期 → 移出队列、`wake.state=not_started`、detail `expired at …; not woken`，业务 status 不变（不视为失败）。
+- P3：不改 fsutil。P4：故障注入仅 `EngineOptions.fault` 测试钩子，默认关，无环境变量。
+- P5：沿用退出码：交付 not_sent/unknown → 5（历史语义"已写入但未唤醒或 sink 失败"），冲突 7，规则拒 1。
+- 本轮不升版本、不加 sink 别名、不真实发送。
+
 ## 1. 核实结论（静态阅读，未复现）
 
 ### B3 回复终态与 sink 交付耦合 —— 与票面一致
