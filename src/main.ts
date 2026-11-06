@@ -41,8 +41,9 @@ Commands:
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
-  redeliver <reply-id> [--accept-duplicate-risk]
-                              send one reply to its sink again by hand (unknown outcomes need the risk flag)
+  redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]
+                              send one reply to its sink again by hand (unknown outcomes need the risk flag;
+                              a sink contract violation needs --after-contract-fix once the sink is fixed)
   release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
   prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
   init [--print-config] [--force]         write an example config and create the inbox
@@ -95,6 +96,7 @@ const OPTIONS = {
   "print-config": { type: "boolean" },
   force: { type: "boolean" },
   "accept-duplicate-risk": { type: "boolean" },
+  "after-contract-fix": { type: "boolean" },
 } as const;
 
 async function readInput(io: Io, src: string | undefined): Promise<string> {
@@ -266,8 +268,8 @@ async function run(argv: string[], io: Io): Promise<number> {
     }
     case "redeliver": {
       const id = pos[0];
-      if (!id) throw usage("redeliver <reply-id> [--accept-duplicate-risk]");
-      return print(await eng.redeliver(id, { acceptRisk: !!o["accept-duplicate-risk"] }));
+      if (!id) throw usage("redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]");
+      return print(await eng.redeliver(id, { acceptRisk: !!o["accept-duplicate-risk"], afterContractFix: !!o["after-contract-fix"] }));
     }
     case "release": {
       const r = await eng.release(o.target ?? pos[0]);
@@ -296,13 +298,17 @@ async function run(argv: string[], io: Io): Promise<number> {
 }
 
 /** Delivery of the latest reply to the task's sink; shown apart from status so `done` never reads as "report arrived". */
-function reportState(r: { replies: { id: string; delivery?: { state: string; sink_state?: string; detail?: string } }[] }): string {
+function reportState(r: { replies: { id: string; delivery?: { state: string; sink_state?: string; detail?: string; contract_violation?: boolean } }[] }): string {
   const x = [...r.replies].reverse().find((x) => x.delivery);
   const d = x?.delivery;
   if (!x || !d) return "";
-  const sink = d.sink_state && d.sink_state !== d.state ? `/${d.sink_state}` : "";
+  const sink = d.contract_violation ? "/contract_violation" : d.sink_state && d.sink_state !== d.state ? `/${d.sink_state}` : "";
   // "failed" is not "delivered": the reply is kept and can be repaired by hand
-  const fix = d.state === "failed" ? ` (not delivered, needs repair: redeliver ${x.id})` : "";
+  const fix = d.contract_violation
+    ? ` (sink CONTRACT VIOLATION, not a network unknown; not resent automatically; fix the sink, then redeliver ${x.id} --after-contract-fix)`
+    : d.sink_state === "superseded"
+      ? " (old reply handled safely, not delivered; newer report and status unchanged)"
+      : d.state === "failed" ? ` (not delivered, needs repair: redeliver ${x.id})` : "";
   return ` report=${d.state}${sink}${fix}`;
 }
 

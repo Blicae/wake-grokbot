@@ -64,7 +64,7 @@ describe("M2: after a terminal status, new non-terminal replies are refused befo
     expect(after).toEqual(before);
     expect(after.status).toBe("done");
     expect(fs.existsSync(path.join(s.inbox, "receipts", `${wid}.json`))).toBe(false);
-    const intents = path.join(s.state, "intents");
+    const intents = path.join(s.state, "pending-replies");
     if (fs.existsSync(intents)) expect(fs.readdirSync(intents).join(",")).not.toContain(wid);
     expect(fs.readFileSync(rp, "utf8")).toMatch(/ok/);
   });
@@ -178,5 +178,80 @@ describe("M5: no fault injection through the package root", () => {
     expect(opts).not.toMatch(/fault|deliverFn/);
     const idx = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "index.ts"), "utf8");
     expect(idx).not.toMatch(/testhooks/);
+  });
+});
+
+describe("contract violation: never replayed automatically, kept for an explicit manual repair", () => {
+  const noOutcome = async () => ({ ok: true, detail: "stub without outcome field" }) as never;
+  it("file sink: status/reply say contract violation; recover skips; redeliver needs --after-contract-fix (not the risk flag)", async () => {
+    const { s, rootDir } = reportBox();
+    const rp = path.join(rootDir, "cv.md");
+    const e = task({ reply_to: { sink: "hufu-report", report_path: rp } });
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const eng = engine(s);
+    _setCoreTestHooks(eng, { deliverFn: noOutcome });
+    const r = await eng.reply(e.id, { status: "done", summary: "ok" });
+    expect(r.code).toBe(5);
+    expect(r.message).toMatch(/CONTRACT VIOLATION/);
+    const rid = receipt(s, e.id).replies[0].id;
+    expect(fs.readdirSync(path.join(s.state, "pending-replies")).join(",")).toContain(rid);
+    await engine(s, later).recover();
+    expect(fs.existsSync(rp)).toBe(false);
+    const st = await s.run(["status", e.id]);
+    expect(st.out).toMatch(/report=unknown\/contract_violation/);
+    expect(st.out).toMatch(/after-contract-fix/);
+    const blind = await s.run(["redeliver", rid, "--accept-duplicate-risk"]);
+    expect(blind.code).toBe(1);
+    expect(blind.err).toMatch(/contract violation/);
+    expect(fs.existsSync(rp)).toBe(false);
+    const fix = await s.run(["redeliver", rid, "--after-contract-fix"]);
+    expect(fix.code).toBe(0);
+    expect(fs.existsSync(rp + ".DONE")).toBe(true);
+    expect(receipt(s, e.id).replies[0].delivery.contract_violation).toBeUndefined();
+  });
+
+  it("webhook sink: the contract flag alone is not enough when an outside side effect may have happened", async () => {
+    const { srv, s } = await hookBox(200);
+    const e = task({ reply_to: { sink: "webhook", url_ref: "h" } });
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const eng = engine(s);
+    _setCoreTestHooks(eng, { deliverFn: noOutcome });
+    await eng.reply(e.id, { status: "done", summary: "ok" });
+    const rid = receipt(s, e.id).replies[0].id;
+    expect((await s.run(["redeliver", rid, "--accept-duplicate-risk"])).code).toBe(1);
+    expect((await s.run(["redeliver", rid, "--after-contract-fix"])).code).toBe(1);
+    expect(srv.hits).toHaveLength(0);
+    expect((await s.run(["redeliver", rid, "--after-contract-fix", "--accept-duplicate-risk"])).code).toBe(0);
+    expect(srv.hits).toHaveLength(1);
+  });
+});
+
+describe("superseded: exit 0 means the old delivery was handled safely, not that a report arrived", () => {
+  it("re-running a legacy older reply after done: exit 0, explicit superseded wording, nothing delivered, done kept", async () => {
+    const { s, rootDir } = reportBox();
+    const rp = path.join(rootDir, "sp.md");
+    const e = task({ reply_to: { sink: "hufu-report", report_path: rp } });
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    class Crash extends Error {}
+    const wid = uuid();
+    const input = { id: wid, status: "working" as const, summary: "old", sent_at: "2026-11-06T02:00:00Z" };
+    const eng = engine(s);
+    _setCoreTestHooks(eng, { fault: (p) => { if (p === "reply:after-enqueue") throw new Crash(p); } });
+    await expect(eng.reply(e.id, { ...input })).rejects.toBeInstanceOf(Crash);
+    await engine(s).reply(e.id, { status: "done", summary: "ok" });
+    const report = fs.readFileSync(rp, "utf8");
+    const r = await engine(s).reply(e.id, { ...input });
+    expect(r.code).toBe(0);
+    expect(r.message).toMatch(/superseded/);
+    expect(r.message).toMatch(/not delivered/);
+    expect(r.message).toMatch(/unchanged/);
+    expect(r.message).not.toMatch(/sink delivered/);
+    const w = receipt(s, e.id).replies.find((x: { id: string }) => x.id === wid);
+    expect(w.delivery).toMatchObject({ state: "not_sent", sink_state: "superseded" });
+    expect(w.delivery.detail).toMatch(/superseded.*unchanged/);
+    expect(receipt(s, e.id).status).toBe("done");
+    expect(fs.readFileSync(rp, "utf8")).toBe(report);
+    const st = await s.run(["status", e.id]);
+    expect(st.out).not.toMatch(/report=delivered/);
   });
 });

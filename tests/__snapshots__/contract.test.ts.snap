@@ -201,8 +201,9 @@ Commands:
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
-  redeliver <reply-id> [--accept-duplicate-risk]
-                              send one reply to its sink again by hand (unknown outcomes need the risk flag)
+  redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]
+                              send one reply to its sink again by hand (unknown outcomes need the risk flag;
+                              a sink contract violation needs --after-contract-fix once the sink is fixed)
   release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
   prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
   init [--print-config] [--force]         write an example config and create the inbox

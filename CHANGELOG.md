@@ -17,6 +17,11 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
   `webhook`/`command` unknowns are still never resent automatically. A delivery that gave up stays `failed` with its
   original reply, hash and revision, and `redeliver` can repair it; `recover` and `redeliver` treat an open attempt as
   live for the same `max(timeout_seconds x 3, 10 min)`.
+  A sink result with no `outcome` is a **contract violation**: shown as `report=unknown/contract_violation`, kept with
+  its reply, never replayed automatically (also for report sinks); after fixing the sink, repair it by hand with
+  `redeliver <id> --after-contract-fix` (`--accept-duplicate-risk` alone does not cover it; a webhook/command also
+  needs that flag). `superseded` (exit 0) means an old reply was handled safely and **not delivered**; the newer report
+  and the business status are unchanged.
 - Sinks contract v1 (unreleased 0.1, **breaking for `.DONE` readers** of earlier development builds): `.DONE` is
   written only for terminal statuses (`done`, `failed`, `declined`), never for `working`/`needs_input`/`blocked`;
   its format is now `wake-report-done/1` (`format`, `id`, `status`, `at`, plus `task_id`, `revision`, `reply_hash`,

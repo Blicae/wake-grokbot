@@ -464,13 +464,15 @@ export class Engine {
             ? "delivered"
             : d.attempt_started_at
               ? "attempt in progress (not confirmed)"
+              : d.state === "unknown" && d.contract_violation
+                ? "outcome UNKNOWN, sink CONTRACT VIOLATION (not resent automatically; fix the sink, then redeliver --after-contract-fix)"
               : d.state === "unknown"
               ? "outcome UNKNOWN (not resent automatically)"
               : d.state === "not_sent"
                 ? d.sink_state === "conflict"
                   ? "not sent (conflict)"
                   : d.sink_state === "superseded"
-                    ? "not sent (superseded)"
+                    ? "superseded (old reply handled safely, not delivered)"
                     : "not sent"
                 : d.state === "pending"
                   ? "pending"
@@ -566,6 +568,8 @@ export class Engine {
       d.state = outcome === "not_sent" && res.state !== "superseded" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
       d.at = new Date(this.now()).toISOString();
       d.detail = missing ? (res.detail ? `${res.detail}; ${OUTCOME_MISSING_DETAIL}` : OUTCOME_MISSING_DETAIL) : res.detail;
+      if (res.state === "superseded")
+        d.detail = `superseded by a later terminal reply: this old reply was not delivered; the newer report and the business status are unchanged (${res.detail ?? ""})`;
       const st = res.state;
       if (st) d.sink_state = st;
       if (missing) d.contract_violation = true;
@@ -673,7 +677,7 @@ export class Engine {
   }
 
   /** Manual redelivery of one reply. An unknown outcome of a sink with outside side effects needs `acceptRisk`. */
-  async redeliver(replyId: string, o: { acceptRisk?: boolean } = {}): Promise<Result> {
+  async redeliver(replyId: string, o: { acceptRisk?: boolean; afterContractFix?: boolean } = {}): Promise<Result> {
     const i = this.store.readIntent(replyId);
     if (!i?.reply_to) {
       const d = this.store.lock(() => this.findDelivery(replyId));
@@ -688,6 +692,10 @@ export class Engine {
       if (!r || !d) throw rule(`no delivery record for ${replyId}`);
       if (d.state === "delivered") throw rule(`${replyId} was already delivered`);
       if (isSettled(d)) throw rule(`${replyId} was superseded by a later terminal reply; nothing to send`);
+      if (d.contract_violation && !o.afterContractFix)
+        throw rule(
+          `${replyId}: sink contract violation (the sink returned no outcome), not a network unknown; fix the sink first, then re-run with --after-contract-fix (--accept-duplicate-risk does not cover this)`,
+        );
       if (this.attemptLive(d))
         throw rule(`${replyId}: a delivery attempt is in progress`);
       if ((d.state === "unknown" || d.attempt_started_at) && !replaySafe(i.reply_to!) && !o.acceptRisk)
@@ -700,8 +708,9 @@ export class Engine {
     });
     const d = await this.deliverIntent(i);
     const r = this.store.readReceipt(i.taskId)!;
-    const ok = d?.state === "delivered";
-    return { code: ok ? EXIT.OK : EXIT.NOT_WOKEN, receipt: r, message: `redeliver ${replyId}: ${d?.state ?? "skipped"}${d?.detail ? ` (${d.detail})` : ""}` };
+    const ok = d?.state === "delivered" || (!!d && isSettled(d));
+    const label = d && isSettled(d) ? "superseded (not delivered)" : (d?.state ?? "skipped");
+    return { code: ok ? EXIT.OK : EXIT.NOT_WOKEN, receipt: r, message: `redeliver ${replyId}: ${label}${d?.detail ? ` (${d.detail})` : ""}` };
   }
 
   /**
