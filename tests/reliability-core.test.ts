@@ -15,10 +15,10 @@ const crashAt = (point: string) => (p: string) => {
   if (p === point) throw new Crash(`simulated crash at ${p}`);
 };
 type S = ReturnType<typeof sandbox>;
-const engine = (s: S, o: { fault?: (p: string) => void; now?: () => number } = {}) =>
+const engine = (s: S, o: ConstructorParameters<typeof Engine>[1] = {}) =>
   new Engine(loadConfig({ config: s.cfgPath, env: s.env }), { env: s.env, ...o });
 const later = () => Date.now() + 3600_000; // "after a restart, long after the crash"
-const files = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".json")) : []);
+const files = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".json") && !f.endsWith(".wake.json")) : []);
 const receipt = (s: S, id: string) => JSON.parse(fs.readFileSync(path.join(s.inbox, "receipts", `${id}.json`), "utf8"));
 
 describe("accept crash windows", () => {

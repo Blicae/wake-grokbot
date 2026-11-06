@@ -271,7 +271,8 @@ exports[`CLI contract > reply: needs_input without question â†’ 1; bad status â†
         "state": "delivered",
         "attempts": 1,
         "at": "<TIME>",
-        "detail": "file T-1.reply.json"
+        "detail": "file T-1.reply.json",
+        "sink_state": "delivered"
       },
       "sink_result": "ok: file T-1.reply.json"
     }

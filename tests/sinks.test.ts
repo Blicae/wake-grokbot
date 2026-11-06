@@ -24,7 +24,8 @@ describe("file sink", () => {
   it("honours sinks.file.dir", async () => {
     const s = sandbox({ sinks: { file: { dir: "out" } } });
     const { e } = await sendAndReply(s, { sink: "file" });
-    expect(fs.readdirSync(path.join(s.dir, "out"))).toEqual([`${e.id}.reply.json`]);
+    // core always passes ctx.delivery, so the file sink also writes `<file>.wake.json`
+    expect(fs.readdirSync(path.join(s.dir, "out")).sort()).toEqual([`${e.id}.reply.json`, `${e.id}.reply.json.wake.json`].sort());
   });
 });
 
@@ -100,16 +101,22 @@ describe("hufu-report sink (Hufu-style report file)", () => {
     expect(fs.statSync(report + ".DONE").mtimeMs).toBeGreaterThanOrEqual(fs.statSync(report).mtimeMs);
     expect(e.id).toBeTruthy();
   });
-  it("a stale .DONE is removed and not recreated when writing the report fails", async () => {
+  it("an unowned stale .DONE conflicts under task delivery and is left alone", async () => {
+    // With ctx.delivery (always passed by core), a pre-existing .DONE without .wake.json means the
+    // target is not owned by this delivery → conflict / not_sent. The sink must not delete or
+    // overwrite an unowned marker. (Owned half-writes that remove a stale marker are covered in
+    // sinks-repair under the delivery lock.)
     const s0 = sandbox();
     const root = path.join(s0.dir, "reports");
     const report = path.join(root, "r.md");
-    fs.mkdirSync(report, { recursive: true }); // a folder in the way: the report write fails
+    fs.mkdirSync(report, { recursive: true }); // a folder in the way would also break a legacy write
     fs.writeFileSync(report + ".DONE", "stale");
     const s = sandbox({ sinks: { report_roots: [root] } });
     const { r } = await sendAndReply(s, { sink: "hufu-report", report_path: report });
     expect(r.code).toBe(5);
-    expect(fs.existsSync(report + ".DONE")).toBe(false);
+    expect(fs.existsSync(report + ".DONE")).toBe(true); // unowned marker preserved
+    expect(r.json().replies[0].delivery.state).toBe("not_sent");
+    expect(r.json().replies[0].delivery.sink_state).toBe("conflict");
   });
   it("rejects paths outside the allowed roots, traversal, relative paths and no roots", async () => {
     const s0 = sandbox();
