@@ -6,10 +6,11 @@ import { type ChannelContext, makeChannel, type WakeOutcome, type WakePayload } 
 import { configInfo, HARD_HOURLY_PER_ROUTINE, HARD_HOURLY_TOTAL, type Loaded } from "./config.js";
 import { CliError, EXIT, rule, usage } from "./errors.js";
 import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, validate, VERSION, verify } from "./envelope.js";
-import { atomicCreate, renameRetry } from "./fsutil.js";
+import { atomicCreate, readJson, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
-import { deliver } from "./sinks.js";
+import { type DeliveryContext, type DeliveryRecord, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
+import { deliver, type SinkContext } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
 
 /** Rate-limited wakes without Retry-After back off 15, 30, 60 ... minutes (ordinary 4xx: 1, 2, 4 ... 60). */
@@ -22,7 +23,12 @@ export interface EngineOptions {
   env?: NodeJS.ProcessEnv;
   stdinKey?: string;
   now?: () => number;
+  /** Test-only crash injection: called at each persistence point; throwing simulates a crash there. Off by default. */
+  fault?: (point: string) => void;
 }
+
+/** An attempt older than this with no recorded result belongs to a dead process. */
+const STALE_ATTEMPT_MIN_MS = 10 * 60_000;
 
 export interface Result {
   code: number;
@@ -48,6 +54,13 @@ export class Engine {
     this.store = new Store(loaded.inbox, loaded.state);
     this.env = opts.env ?? process.env;
     this.now = opts.now ?? Date.now;
+  }
+
+  /** Test hook: sees every sink context the core passes to `deliver`. */
+  onDeliver?: (ctx: SinkContext & { delivery: DeliveryContext }) => void;
+
+  private fault(point: string): void {
+    this.opts.fault?.(point);
   }
 
   get cfg() {
@@ -121,31 +134,55 @@ export class Engine {
     const accepted = this.store.lock(() => {
       this.store.ensure();
       const old = this.store.readReceipt(e.id);
+      const existing = old ? null : this.store.findEnvelope(e.id);
       // order: a known id follows the idempotency rules (0 / 7, no expiry check); then pruned ids; then expiry for new ids
-      if (!old && this.store.wasPruned(e.id)) throw rule(`id ${e.id} was already used and its receipt was pruned; nothing written, use a new id`);
-      if (!old && !this.store.findEnvelope(e.id) && o.rejectExpired && isExpired(e, this.now())) throw rule(`envelope expired at ${e.expires_at}; nothing written`);
+      if (!old && !existing && this.store.wasPruned(e.id)) throw rule(`id ${e.id} was already used and its receipt was pruned; nothing written, use a new id`);
+      if (!old && !existing && o.rejectExpired && isExpired(e, this.now())) throw rule(`envelope expired at ${e.expires_at}; nothing written`);
       if (old) {
         if (old.hash !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
-        return { receipt: old, fresh: false };
+        return { receipt: old, fresh: false, requeued: this.requeueIfLost(old) };
       }
-      const file = path.join(this.store.msgDir(e.to), `${e.id}.json`);
-      atomicCreate(file, JSON.stringify(e, null, 2) + "\n");
+      let file: string;
+      if (existing) {
+        // crash after the envelope, before its receipt: the envelope file is the source of truth
+        if (contentHash(readJson<Envelope>(existing)) !== hash) throw new CliError(`id ${e.id} was already used with different content; nothing written`, EXIT.CONFLICT);
+        if (this.store.readIntent(e.id)) throw rule(`id ${e.id} belongs to a reply in progress; nothing written`);
+        file = existing;
+        this.store.log("recovered", { id: e.id, what: "receipt" });
+      } else {
+        file = path.join(this.store.msgDir(e.to), `${e.id}.json`);
+        atomicCreate(file, JSON.stringify(e, null, 2) + "\n");
+        this.fault("accept:after-envelope");
+      }
       const r = this.newReceipt(e, hash, file, target, o.ingestedFrom);
       this.store.writeReceipt(r);
+      this.fault("accept:after-receipt");
       if (target) {
         const ob = this.store.loadOutbox();
         this.store.target(ob, target).queue.push(e.id);
         this.store.saveOutbox(ob);
       }
-      return { receipt: r, fresh: true };
+      return { receipt: r, fresh: true, requeued: false };
     });
+    if (!accepted.fresh && accepted.requeued && !o.noWake) await this.pump(accepted.receipt.wake.target);
     if (!accepted.fresh) {
-      const r = accepted.receipt;
+      const r = accepted.requeued ? this.store.readReceipt(e.id)! : accepted.receipt;
       return { code: codeFor(r.wake.state), receipt: r, message: `already accepted (same content): ${e.id}` };
     }
     if (target && !o.noWake) await this.pump(target);
     const r = this.store.readReceipt(e.id)!;
     return { code: codeFor(o.noWake ? "queued" : r.wake.state), receipt: r, message: wakeMessage(r) };
+  }
+
+  /** A receipt that says `queued` but sits in no queue and no in-flight wake (crash before the outbox write): queue it. Call under the lock. */
+  private requeueIfLost(r: Receipt): boolean {
+    if (r.wake.state !== "queued" || !r.wake.target) return false;
+    const ob = this.store.loadOutbox();
+    if (this.store.inOutbox(ob, r.id)) return false;
+    this.store.target(ob, r.wake.target).queue.push(r.id);
+    this.store.saveOutbox(ob);
+    this.store.log("recovered", { id: r.id, what: "queue" });
+    return true;
   }
 
   private setWake(ids: string[], state: WakeState, target: string, detail: string, onlyIf?: WakeState[]): void {
@@ -180,6 +217,15 @@ export class Engine {
             ts.inflight = null;
           }
         }
+        // expiry is checked right before execution: an item that expired while queued is not woken (status unchanged)
+        ts.queue = ts.queue.filter((id) => {
+          const env = this.store.readEnvelope(id);
+          const r = this.store.readReceipt(id);
+          if (!isExpired(env, now) || (r && isTerminal(r.status as Status))) return true;
+          this.setWake([id], "not_started", name, `expired at ${env!.expires_at}; not woken`);
+          this.store.log("expired", { target: name, id });
+          return false;
+        });
         let skip: { state: WakeState; detail: string } | null = null;
         const off = this.disabled();
         if (!ts.queue.length) skip = null;
@@ -357,52 +403,233 @@ export class Engine {
     if (key) reply.sig = sign(reply, key);
     const hash = contentHash(reply);
     const target = this.targetFor(reply.to);
-    const freed = this.store.lock(() => {
+    const intent = this.store.lock((): ReplyIntent => {
       this.store.ensure();
       const old = this.store.readReceipt(reply.id);
-      if (old) throw new CliError(`id ${reply.id} already exists`, old.hash === hash ? EXIT.RULE : EXIT.CONFLICT);
-      const file = path.join(this.store.msgDir(reply.to), `${reply.id}.json`);
-      atomicCreate(file, JSON.stringify(reply, null, 2) + "\n");
-      this.store.writeReceipt(this.newReceipt(reply, hash, file, target));
-      if (target) {
-        const ob = this.store.loadOutbox();
-        this.store.target(ob, target).queue.push(reply.id);
-        this.store.saveOutbox(ob);
+      const pending = this.store.readIntent(reply.id);
+      if (old || pending) {
+        const oldHash = old?.hash ?? pending!.hash;
+        if (oldHash !== hash) throw new CliError(`id ${reply.id} already exists`, EXIT.CONFLICT);
+        // same reply sent again: finish an interrupted one, never write it twice
+        if (!pending) throw new CliError(`id ${reply.id} already exists`, EXIT.RULE);
+        return pending;
       }
-      const r = this.store.readReceipt(id);
-      if (r) {
-        r.status = reply.status!;
-        r.next = reply.next;
-        r.acked_at ??= reply.sent_at;
-        r.replies.push({ id: reply.id, status: reply.status!, at: reply.sent_at, ...(orig.reply_to ? { sink: orig.reply_to.sink } : {}) });
-        this.store.writeReceipt(r);
+      const task = this.store.readReceipt(id);
+      const revision = Math.max(task?.last_revision ?? 0, ...(task?.replies ?? []).map((x) => x.revision ?? 0), task?.replies.length ?? 0) + 1;
+      if (task) {
+        task.last_revision = revision;
+        this.store.writeReceipt(task);
       }
-      this.markRead(id);
-      return this.settleInflight(id);
+      const i: ReplyIntent = {
+        v: 1,
+        taskId: id,
+        replyId: reply.id,
+        hash,
+        revision,
+        ...(target ? { target } : {}),
+        reply,
+        ...(orig.reply_to ? { reply_to: orig.reply_to } : {}),
+        created_at: new Date(this.now()).toISOString(),
+      };
+      this.store.writeIntent(i);
+      this.fault("reply:after-intent");
+      return i;
     });
+    const freed = this.store.lock(() => this.applyIntent(intent));
     let code: number = EXIT.OK;
     let msg = `replied to ${id} with ${reply.status} (${reply.id})`;
-    if (orig.reply_to) {
-      const res = await deliver(reply, orig.reply_to, {
-        cfg: this.cfg,
-        inbox: this.store.inbox,
-        env: this.env,
-        timeoutMs: this.cfg.wake.timeout_seconds * 1000,
-      });
-      this.store.lock(() => {
-        const r = this.store.readReceipt(id);
-        const rec = r?.replies.find((x) => x.id === reply.id);
-        if (r && rec) {
-          rec.sink_result = (res.ok ? "ok: " : "failed: ") + res.detail;
-          this.store.writeReceipt(r);
-        }
-      });
-      msg += `; sink ${res.ok ? "delivered" : "FAILED"}: ${res.detail}`;
-      if (!res.ok) code = EXIT.NOT_WOKEN;
+    if (intent.reply_to) {
+      const d = await this.deliverIntent(intent);
+      if (d) {
+        msg += `; sink ${d.state === "delivered" ? "delivered" : d.state === "unknown" ? "outcome UNKNOWN (not resent automatically)" : "FAILED"}: ${d.detail ?? ""}`;
+        if (d.state !== "delivered") code = EXIT.NOT_WOKEN;
+      }
     }
     for (const t of new Set([...freed, ...(target ? [target] : [])])) await this.pump(t);
     if (target && code === EXIT.OK) code = codeFor(this.store.readReceipt(reply.id)!.wake.state);
     return { code, receipt: this.store.readReceipt(id) ?? this.store.readReceipt(reply.id)!, message: msg, replyId: reply.id };
+  }
+
+  /** Write every file of a reply that is still missing (idempotent). Call under the lock. Returns targets freed. */
+  private applyIntent(i: ReplyIntent): string[] {
+    const reply = i.reply;
+    if (!this.store.findEnvelope(reply.id)) {
+      atomicCreate(path.join(this.store.msgDir(reply.to), `${reply.id}.json`), JSON.stringify(reply, null, 2) + "\n");
+    }
+    this.fault("reply:after-envelope");
+    const rr = this.store.readReceipt(reply.id);
+    if (!rr) {
+      const file = this.store.findEnvelope(reply.id)!;
+      const fresh = this.newReceipt(reply, i.hash, file, i.target);
+      this.store.writeReceipt(fresh);
+      this.fault("reply:after-receipt");
+      this.requeueIfLost(fresh);
+    } else this.requeueIfLost(rr);
+    this.fault("reply:after-enqueue");
+    const r = this.store.readReceipt(i.taskId);
+    if (r && !r.replies.some((x) => x.id === reply.id)) {
+      if (i.revision > (r.status_revision ?? 0)) {
+        r.status = reply.status!;
+        r.next = reply.next;
+        r.status_revision = i.revision;
+      }
+      r.acked_at ??= reply.sent_at;
+      r.last_revision = Math.max(r.last_revision ?? 0, i.revision);
+      r.replies.push({
+        id: reply.id,
+        status: reply.status!,
+        at: reply.sent_at,
+        revision: i.revision,
+        ...(i.reply_to ? { sink: i.reply_to.sink, delivery: { state: "pending", attempts: 0 } as DeliveryRecord } : {}),
+      });
+      this.store.writeReceipt(r);
+    }
+    this.fault("reply:after-task");
+    this.markRead(i.taskId);
+    if (!i.reply_to || !r) this.store.removeIntent(i.replyId);
+    return this.settleInflight(i.taskId);
+  }
+
+  /**
+   * Deliver one reply to its sink at most once per call. `attempt_started_at` is persisted before the sink runs;
+   * only a record that is `pending` / `not_sent` with no open attempt is sent. Returns the final record.
+   */
+  private async deliverIntent(i: ReplyIntent): Promise<DeliveryRecord | null> {
+    const to = i.reply_to!;
+    const go = this.store.lock(() => {
+      const r = this.store.readReceipt(i.taskId);
+      const rec = r?.replies.find((x) => x.id === i.replyId);
+      const d = rec?.delivery;
+      if (!r || !rec || !d) return null;
+      if ((d.state !== "pending" && d.state !== "not_sent") || d.attempt_started_at) return null;
+      d.attempt_started_at = new Date(this.now()).toISOString();
+      d.attempts += 1;
+      this.store.writeReceipt(r);
+      return true;
+    });
+    if (!go) return null;
+    this.fault("reply:before-deliver");
+    const ctx = {
+      cfg: this.cfg,
+      inbox: this.store.inbox,
+      env: this.env,
+      timeoutMs: this.cfg.wake.timeout_seconds * 1000,
+      delivery: { taskId: i.taskId, replyHash: i.hash, revision: i.revision },
+    };
+    this.onDeliver?.(ctx);
+    const res = await deliver(i.reply, to, ctx);
+    this.fault("reply:after-deliver");
+    return this.store.lock(() => {
+      const r = this.store.readReceipt(i.taskId);
+      const rec = r?.replies.find((x) => x.id === i.replyId);
+      if (!r || !rec?.delivery) return null;
+      const outcome = outcomeOf(res, to);
+      const d = rec.delivery;
+      delete d.attempt_started_at;
+      d.state = outcome === "not_sent" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
+      d.at = new Date(this.now()).toISOString();
+      d.detail = res.detail;
+      const st = (res as { state?: DeliveryRecord["sink_state"] }).state;
+      if (st) d.sink_state = st;
+      rec.sink_result = (res.ok ? "ok: " : "failed: ") + res.detail;
+      this.store.writeReceipt(r);
+      if (d.state !== "not_sent" && d.state !== "unknown") this.store.removeIntent(i.replyId);
+      this.store.log("delivery", { task: i.taskId, reply: i.replyId, state: d.state, detail: res.detail });
+      return d;
+    });
+  }
+
+  /**
+   * Repair what a crash left behind, idempotently: envelopes without receipts, receipts lost from the queue,
+   * half-written replies, and reply deliveries. An open attempt of a sink that is not replay-safe becomes
+   * `unknown` and is never sent again automatically; replay-safe sinks and `not_sent` are delivered.
+   */
+  async recover(): Promise<{ repaired: string[]; delivered: string[] }> {
+    const repaired: string[] = [];
+    const staleMs = Math.max(this.cfg.wake.timeout_seconds * 3000, STALE_ATTEMPT_MIN_MS);
+    const todo = this.store.lock(() => {
+      this.store.ensure();
+      const intents = this.store.listIntents();
+      const replyIds = new Set(intents.map((i) => i.replyId));
+      for (const side of ["worker", "dispatcher"])
+        for (const sub of ["unread", "read"] as const) {
+          const dir = this.store.msgDir(side, sub);
+          for (const f of fs.readdirSync(dir)) {
+            if (!f.endsWith(".json") || f.startsWith(".")) continue;
+            const id = f.slice(0, -5);
+            if (replyIds.has(id) || this.store.readReceipt(id)) continue;
+            const e = readJson<Envelope>(path.join(dir, f));
+            if (e.id !== id) continue;
+            const r = this.newReceipt(e, contentHash(e), path.join(dir, f), this.targetFor(e.to));
+            this.store.writeReceipt(r);
+            this.requeueIfLost(r);
+            repaired.push(id);
+          }
+        }
+      const rdir = path.join(this.store.inbox, "receipts");
+      for (const f of fs.readdirSync(rdir)) {
+        if (!f.endsWith(".json") || f.startsWith(".")) continue;
+        const r = readJson<Receipt>(path.join(rdir, f));
+        if (this.requeueIfLost(r)) repaired.push(r.id);
+      }
+      const out: ReplyIntent[] = [];
+      for (const i of intents) {
+        this.applyIntent(i);
+        if (!i.reply_to) continue;
+        const r = this.store.readReceipt(i.taskId);
+        const rec = r?.replies.find((x) => x.id === i.replyId);
+        const d = rec?.delivery;
+        if (!r || !d) continue;
+        if (d.attempt_started_at) {
+          if (this.now() - Date.parse(d.attempt_started_at) < staleMs) continue; // maybe still running elsewhere
+          delete d.attempt_started_at;
+          if (replaySafe(i.reply_to)) d.state = "pending";
+          else {
+            d.state = "unknown";
+            d.at = new Date(this.now()).toISOString();
+            d.detail = "the process died during delivery; outcome unknown, not resent (use redeliver to send again)";
+            rec.sink_result = "failed: " + d.detail;
+          }
+          this.store.writeReceipt(r);
+          repaired.push(i.replyId);
+        }
+        if (d.state === "pending" || d.state === "not_sent") out.push(i);
+      }
+      return out;
+    });
+    const delivered: string[] = [];
+    for (const i of todo) {
+      const d = await this.deliverIntent(i);
+      if (d?.state === "delivered") delivered.push(i.replyId);
+    }
+    if (repaired.length) this.store.log("recovered", { ids: repaired });
+    return { repaired, delivered };
+  }
+
+  /** Manual redelivery of one reply. An unknown outcome of a sink with outside side effects needs `acceptRisk`. */
+  async redeliver(replyId: string, o: { acceptRisk?: boolean } = {}): Promise<Result> {
+    const i = this.store.readIntent(replyId);
+    if (!i?.reply_to) throw rule(`no undelivered reply ${replyId} (already delivered, or no sink)`);
+    this.store.lock(() => {
+      const r = this.store.readReceipt(i.taskId);
+      const rec = r?.replies.find((x) => x.id === replyId);
+      const d = rec?.delivery;
+      if (!r || !d) throw rule(`no delivery record for ${replyId}`);
+      if (d.state === "delivered") throw rule(`${replyId} was already delivered`);
+      if (d.attempt_started_at && this.now() - Date.parse(d.attempt_started_at) < STALE_ATTEMPT_MIN_MS)
+        throw rule(`${replyId}: a delivery attempt is in progress`);
+      if ((d.state === "unknown" || d.attempt_started_at) && !replaySafe(i.reply_to!) && !o.acceptRisk)
+        throw rule(
+          `${replyId}: the last ${i.reply_to!.sink} delivery may already have arrived; sending again can duplicate it. Re-run with --accept-duplicate-risk to send anyway`,
+        );
+      delete d.attempt_started_at;
+      d.state = "pending";
+      this.store.writeReceipt(r);
+    });
+    const d = await this.deliverIntent(i);
+    const r = this.store.readReceipt(i.taskId)!;
+    const ok = d?.state === "delivered";
+    return { code: ok ? EXIT.OK : EXIT.NOT_WOKEN, receipt: r, message: `redeliver ${replyId}: ${d?.state ?? "skipped"}${d?.detail ? ` (${d.detail})` : ""}` };
   }
 
   /**

@@ -206,6 +206,8 @@ Commands:
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
+  redeliver <reply-id> [--accept-duplicate-risk]
+                              send one reply to its sink again by hand (unknown outcomes need the risk flag)
   release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
   prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
   init [--print-config] [--force]         write an example config and create the inbox
@@ -268,13 +270,22 @@ exports[`CLI contract > reply: needs_input without question â†’ 1; bad status â†
       "id": "<UUID>",
       "status": "done",
       "at": "<TIME>",
+      "revision": 1,
       "sink": "file",
+      "delivery": {
+        "state": "delivered",
+        "attempts": 1,
+        "at": "<TIME>",
+        "detail": "file T-1.reply.json"
+      },
       "sink_result": "ok: file T-1.reply.json"
     }
   ],
   "created_at": "<TIME>",
   "updated_at": "<TIME>",
+  "last_revision": 1,
   "next": "review",
+  "status_revision": 1,
   "acked_at": "<TIME>",
   "reply_id": "<UUID>"
 }

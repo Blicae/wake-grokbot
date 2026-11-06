@@ -84,6 +84,21 @@ describe("reply crash windows (file sink)", () => {
     });
   }
 
+  it("the same reply (same id, same content) sent again after a crash finishes it once; changed content → 7", async () => {
+    const s = sandbox();
+    const e = fileSinkTask();
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const input = { status: "done" as const, summary: "ok", id: uuid(), sent_at: "2026-11-06T01:00:00Z" };
+    await expect(engine(s, { fault: crashAt("reply:after-receipt") }).reply(e.id, { ...input })).rejects.toBeInstanceOf(Crash);
+    expect((await engine(s).reply(e.id, { ...input })).code).toBe(0);
+    const r = receipt(s, e.id);
+    expect(r.replies).toHaveLength(1);
+    expect(r.replies[0].delivery.state).toBe("delivered");
+    await expect(engine(s).reply(e.id, { ...input })).rejects.toMatchObject({ code: 1 });
+    await expect(engine(s).reply(e.id, { ...input, summary: "other" })).rejects.toMatchObject({ code: 7 });
+    expect(files(path.join(s.inbox, "replies"))).toHaveLength(1);
+  });
+
   it("hufu-report: report written but .DONE marker missing after a crash → recover rewrites both", async () => {
     const base = sandbox();
     const root = path.join(base.dir, "reports");
@@ -189,11 +204,15 @@ describe("webhook: unknown outcomes are never resent automatically", () => {
 });
 
 describe("expiry before execution (send / ingest / pump agree)", () => {
-  it("send refuses a new expired envelope: exit 1, nothing written", async () => {
-    const s = sandbox();
+  it("send keeps storing an expired envelope (compatible) but it is never woken; ingest still refuses it", async () => {
+    const srv = await stub(() => ({ status: 200 }));
+    const s = sandbox({ ...grokCfg(), sources: { eng: { require_sig: false } } }, { WAKE_GROKBOT_URL: srv.url, WAKE_GROKBOT_KEY: KEY });
     const e = task({ expires_at: "2020-01-01T00:00:00Z" });
-    expect((await s.run(["send", "--json", "-"], JSON.stringify(e))).code).toBe(1);
-    expect(fs.existsSync(path.join(s.inbox, "receipts", `${e.id}.json`))).toBe(false);
+    expect((await s.run(["send", "--json", "-"], JSON.stringify(e))).code).toBe(5);
+    expect(srv.hits).toHaveLength(0);
+    expect(receipt(s, e.id).wake).toMatchObject({ state: "not_started", detail: expect.stringMatching(/expired/) });
+    const i = task({ from: "eng", expires_at: "2020-01-01T00:00:00Z" });
+    expect((await s.run(["ingest", "--from", "eng", "-"], JSON.stringify(i))).code).toBe(1);
   });
 
   it("queued, then expired before the wake: not woken (not_started, expired reason), business status unchanged", async () => {

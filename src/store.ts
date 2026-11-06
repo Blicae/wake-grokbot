@@ -1,6 +1,7 @@
 /** Inbox layout, receipts and the wake outbox. All writes are atomic; state changes run under one lock. */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { DeliveryRecord, ReplyIntent } from "./delivery.js";
 import { mask } from "./secrets.js";
 import type { Envelope, Status } from "./envelope.js";
 import { atomicWrite, readJson, withLock } from "./fsutil.js";
@@ -15,6 +16,10 @@ export interface ReplyRecord {
   at: string;
   sink?: string;
   sink_result?: string;
+  /** per-task revision of this reply (absent on receipts written before the 0.1 repair); the hash is on the reply's own receipt */
+  revision?: number;
+  /** delivery to the reply sink, separate from the business status; absent when the task has no reply_to */
+  delivery?: DeliveryRecord;
 }
 
 export interface Receipt {
@@ -34,6 +39,10 @@ export interface Receipt {
   created_at: string;
   updated_at: string;
   ingested_from?: string;
+  /** highest reply revision allocated for this task */
+  last_revision?: number;
+  /** revision of the reply that set `status` (an older reply never overwrites a newer one) */
+  status_revision?: number;
 }
 
 export interface TargetState {
@@ -147,6 +156,37 @@ export class Store {
 
   target(o: Outbox, name: string): TargetState {
     return (o.targets[name] ??= { inflight: null, queue: [], attempts: 0, next_at: null, dead: [] });
+  }
+
+  intentDir(): string {
+    return path.join(this.state, "pending-replies");
+  }
+
+  writeIntent(i: ReplyIntent): void {
+    atomicWrite(path.join(this.intentDir(), `${i.replyId}.json`), JSON.stringify(i, null, 2) + "\n");
+  }
+
+  readIntent(replyId: string): ReplyIntent | null {
+    const p = path.join(this.intentDir(), `${replyId}.json`);
+    return fs.existsSync(p) ? readJson<ReplyIntent>(p) : null;
+  }
+
+  listIntents(): ReplyIntent[] {
+    const d = this.intentDir();
+    if (!fs.existsSync(d)) return [];
+    return fs
+      .readdirSync(d)
+      .filter((f) => f.endsWith(".json") && !f.startsWith("."))
+      .map((f) => readJson<ReplyIntent>(path.join(d, f)));
+  }
+
+  removeIntent(replyId: string): void {
+    fs.rmSync(path.join(this.intentDir(), `${replyId}.json`), { force: true });
+  }
+
+  /** True if `id` waits in a queue or rides on an in-flight wake of any target. */
+  inOutbox(o: Outbox, id: string): boolean {
+    return Object.values(o.targets).some((t) => t.queue.includes(id) || !!t.inflight?.ids.includes(id));
   }
 
   /** Append one JSON line to `<state>/wake.log`: `{"at","event",...fields}`, masked. */

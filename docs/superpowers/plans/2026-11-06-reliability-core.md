@@ -12,7 +12,7 @@
 - `sinkReplaySafe(to)` 由二号实现；core 以可选导入 + 本地兜底（file/hufu-report=true，其余 false）。幂等头 `x-wake-grokbot-delivery-id = reply.id`（二号）。
 - core：`attempt_started_at` 先于副作用落盘；unknown 不自动重发；watch/recover 只补 replaySafe 或明确 not_sent。
 - 人工补发：新命令 `redeliver <reply-id>`；状态 unknown 且 sink 非 replaySafe 时须 `--accept-duplicate-risk`，否则 exit 1 并说明风险。
-- P2 定稿：不新增 WakeState。过期策略（send/ingest/pump 一致）：新 id 已过期 → send/ingest 均 exit 1 不写入（send 为行为变更）；已知 id 幂等优先（0/7）；已入队条目在 pump 唤醒前若过期 → 移出队列、`wake.state=not_started`、detail `expired at …; not woken`，业务 status 不变（不视为失败）。
+- P2 定稿：不新增 WakeState。过期策略（send/ingest/pump 一致）：新 id 已过期 → ingest exit 1 不写入（不变）；send 保持写入（兼容既有 expires.test 语义），但与入队后过期一样在 pump 前被拦下不唤醒（exit 5）；已知 id 幂等优先（0/7）；已入队条目在 pump 唤醒前若过期 → 移出队列、`wake.state=not_started`、detail `expired at …; not woken`，业务 status 不变（不视为失败）。
 - P3：不改 fsutil。P4：故障注入仅 `EngineOptions.fault` 测试钩子，默认关，无环境变量。
 - P5：沿用退出码：交付 not_sent/unknown → 5（历史语义"已写入但未唤醒或 sink 失败"），冲突 7，规则拒 1。
 - 本轮不升版本、不加 sink 别名、不真实发送。
@@ -157,3 +157,9 @@ git diff --stat 16d0db0 -- src/sinks.ts src/config.ts src/envelope.ts schema exa
 - 停点 S2：任何需要改 sinks/config/envelope/schema 的点 → 停，提 Lead。
 - 停点 S3：P2/P5 决议前，用备选方案实现并标注。
 - 不 push、不合 main、不发版、不真实叫醒。
+
+## 10. 实施记录（冻结 v1 后）
+- 新增 `src/delivery.ts`（DeliveryContext / DeliveryRecord / ReplyIntent / ExtendedSinkResult，`replaySafe`、`outcomeOf` 本地兜底：可选读取 sinks 的 `sinkReplaySafe`，二号实现后自动生效）。
+- 回复意图文件 `state/pending-replies/<replyId>.json` 先于一切回复文件落盘；`Engine.recover()` 由 `watch` 每轮调用；`redeliver <reply-id> [--accept-duplicate-risk]`。
+- status 行加 ` report=<delivery.state>`；契约快照仅新增（help 一条命令；receipt `replies[].revision/delivery`、`last_revision`、`status_revision`）。
+- 二号对接：`ctx.delivery` 已传；SinkResult 的 `outcome/state` 被 `outcomeOf` 识别。
