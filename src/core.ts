@@ -9,7 +9,7 @@ import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, v
 import { atomicCreate, readJson, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
-import { type DeliveryContext, type DeliveryRecord, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
+import { type DeliveryContext, type DeliveryRecord, OUTCOME_MISSING_DETAIL, outcomeMissing, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
 import { deliver, type SinkContext } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
 
@@ -25,6 +25,11 @@ export interface EngineOptions {
   now?: () => number;
   /** Test-only crash injection: called at each persistence point; throwing simulates a crash there. Off by default. */
   fault?: (point: string) => void;
+  /**
+   * Test-only replace for `deliver`. Defaults to the real sinks `deliver`. Never read from CLI/env/config.
+   * Used to assert contract handling (e.g. a result with no `outcome`).
+   */
+  deliverFn?: typeof deliver;
 }
 
 /** An attempt older than this with no recorded result belongs to a dead process. */
@@ -441,7 +446,19 @@ export class Engine {
     if (intent.reply_to) {
       const d = await this.deliverIntent(intent);
       if (d) {
-        msg += `; sink ${d.state === "delivered" ? "delivered" : d.state === "unknown" ? "outcome UNKNOWN (not resent automatically)" : "FAILED"}: ${d.detail ?? ""}`;
+        const sinkLabel =
+          d.state === "delivered"
+            ? "delivered"
+            : d.state === "unknown"
+              ? "outcome UNKNOWN (not resent automatically)"
+              : d.state === "not_sent"
+                ? d.sink_state === "conflict"
+                  ? "not sent (conflict)"
+                  : d.sink_state === "superseded"
+                    ? "not sent (superseded)"
+                    : "not sent"
+                : "FAILED";
+        msg += `; sink ${sinkLabel}: ${d.detail ?? ""}`;
         if (d.state !== "delivered") code = EXIT.NOT_WOKEN;
       }
     }
@@ -517,24 +534,32 @@ export class Engine {
       delivery: { taskId: i.taskId, replyHash: i.hash, revision: i.revision },
     };
     this.onDeliver?.(ctx);
-    const res = await deliver(i.reply, to, ctx);
+    const deliverFn = this.opts.deliverFn ?? deliver;
+    const res = await deliverFn(i.reply, to, ctx);
     this.fault("reply:after-deliver");
     return this.store.lock(() => {
       const r = this.store.readReceipt(i.taskId);
       const rec = r?.replies.find((x) => x.id === i.replyId);
       if (!r || !rec?.delivery) return null;
-      const outcome = outcomeOf(res, to);
+      const missing = outcomeMissing(res);
+      const outcome = outcomeOf(res);
       const d = rec.delivery;
       delete d.attempt_started_at;
       d.state = outcome === "not_sent" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
       d.at = new Date(this.now()).toISOString();
-      d.detail = res.detail;
-      const st = (res as { state?: DeliveryRecord["sink_state"] }).state;
+      d.detail = missing ? (res.detail ? `${res.detail}; ${OUTCOME_MISSING_DETAIL}` : OUTCOME_MISSING_DETAIL) : res.detail;
+      const st = res.state;
       if (st) d.sink_state = st;
-      rec.sink_result = (res.ok ? "ok: " : "failed: ") + res.detail;
+      rec.sink_result = (outcome === "delivered" ? "ok: " : "failed: ") + (d.detail ?? "");
       this.store.writeReceipt(r);
       if (d.state !== "not_sent" && d.state !== "unknown") this.store.removeIntent(i.replyId);
-      this.store.log("delivery", { task: i.taskId, reply: i.replyId, state: d.state, detail: res.detail });
+      this.store.log("delivery", {
+        task: i.taskId,
+        reply: i.replyId,
+        state: d.state,
+        detail: d.detail,
+        ...(missing ? { contract: "missing_outcome" } : {}),
+      });
       return d;
     });
   }

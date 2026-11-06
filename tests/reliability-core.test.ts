@@ -289,3 +289,48 @@ describe("expiry before execution (send / ingest / pump agree)", () => {
     expect(srv.hits).toHaveLength(0);
   });
 });
+
+describe("sink contract: outcome is required", () => {
+  it("a deliver result with no outcome is recorded as unknown (contract violation) and never resent", async () => {
+    const s = sandbox();
+    const e = fileSinkTask();
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const eng = engine(s, {
+      deliverFn: async () => ({ ok: true, detail: "stub without outcome field" }),
+    });
+    const r = await eng.reply(e.id, { status: "done", summary: "ok" });
+    expect(r.code).toBe(5);
+    expect(r.message).toMatch(/UNKNOWN|contract violation|no outcome/i);
+    const d = receipt(s, e.id).replies[0].delivery;
+    expect(d.state).toBe("unknown");
+    expect(d.detail).toMatch(/no outcome \(contract violation\)/);
+    // watch / recover must not call deliver again
+    let calls = 0;
+    const eng2 = engine(s, {
+      now: later,
+      deliverFn: async () => {
+        calls += 1;
+        return { ok: true, detail: "should not run", outcome: "delivered" as const };
+      },
+    });
+    await eng2.recover();
+    await s.run(["watch", "--once"]);
+    expect(calls).toBe(0);
+    expect(receipt(s, e.id).replies[0].delivery.state).toBe("unknown");
+  });
+
+  it("status keeps report=… separate from business done", async () => {
+    const s = sandbox();
+    const e = fileSinkTask();
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const eng = engine(s, {
+      deliverFn: async () => ({ ok: false, detail: "held", outcome: "not_sent" as const, state: "conflict" as const }),
+    });
+    await eng.reply(e.id, { status: "done", summary: "ok" });
+    const st = await s.run(["status", e.id]);
+    expect(st.code).toBe(0);
+    expect(st.out).toMatch(/status=done/);
+    expect(st.out).toMatch(/report=not_sent\/conflict/);
+    expect(st.out).not.toMatch(/report=delivered/);
+  });
+});

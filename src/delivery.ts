@@ -1,12 +1,11 @@
 /**
  * Delivery contract between the core and the reply sinks (RD-001-G interface freeze v1).
  * Shared public types live here (owned by the core); sink-only types stay in sinks.ts.
- * The sinks module may later export `sinkReplaySafe(to)` and return `outcome`/`state`; until then the
- * conservative local fallbacks below apply (file / hufu-report replay-safe; everything else not).
+ * Core always calls the real sinks exports (`sinkReplaySafe`, `outcome`/`state` on SinkResult).
+ * A result with no `outcome` is a contract violation: treated as `unknown`, never inferred as not_sent.
  */
 import type { Envelope, ReplyTo } from "./envelope.js";
-import * as sinks from "./sinks.js";
-import type { SinkResult } from "./sinks.js";
+import { sinkReplaySafe, type SinkOutcome, type SinkResult, type SinkState } from "./sinks.js";
 
 /** Passed as `ctx.delivery` on every core call to `deliver`. `revision` is per task, monotonic, kept on redelivery. */
 export interface DeliveryContext {
@@ -15,11 +14,11 @@ export interface DeliveryContext {
   revision: number;
 }
 
-export type DeliveryOutcome = "delivered" | "not_sent" | "unknown";
-export type SinkState = "delivered" | "duplicate" | "superseded" | "conflict" | "failed";
+export type DeliveryOutcome = SinkOutcome;
+export type { SinkState };
 
-/** What a sink may return under freeze v1 (all extra fields optional; old sinks return plain SinkResult). */
-export type ExtendedSinkResult = SinkResult & { outcome?: DeliveryOutcome; state?: SinkState };
+/** SinkResult as returned by the sinks module; `outcome` is required under freeze v1. */
+export type ExtendedSinkResult = SinkResult;
 
 /** Delivery state of one reply, kept in the task receipt (`replies[i].delivery`), separate from business status. */
 export type DeliveryState = "pending" | DeliveryOutcome | "failed";
@@ -47,16 +46,23 @@ export interface ReplyIntent {
   created_at: string;
 }
 
+/** Direct passthrough to the sinks module; no local sink-kind fallback. */
 export function replaySafe(to: ReplyTo): boolean {
-  const f = (sinks as unknown as Record<string, unknown>).sinkReplaySafe;
-  if (typeof f === "function") return !!(f as (t: ReplyTo) => boolean)(to);
-  return to.sink === "file" || to.sink === "hufu-report";
+  return sinkReplaySafe(to);
 }
 
-export function outcomeOf(res: ExtendedSinkResult, to: ReplyTo): DeliveryOutcome {
-  if (res.state === "delivered" || res.state === "duplicate" || res.state === "superseded") return "delivered";
-  if (res.outcome) return res.outcome;
-  if (res.ok) return "delivered";
-  // old sinks cannot say whether a request left the machine: only replay-safe sinks count as not sent
-  return replaySafe(to) ? "not_sent" : "unknown";
+export const OUTCOME_MISSING_DETAIL =
+  "sink returned no outcome (contract violation); treated as unknown, not resent automatically";
+
+/**
+ * Map a sink result to a delivery outcome. Missing `outcome` is a contract break → `unknown`
+ * (never inferred from `ok` or `state`; never treated as not_sent).
+ */
+export function outcomeOf(res: ExtendedSinkResult): DeliveryOutcome {
+  if (res.outcome === "delivered" || res.outcome === "not_sent" || res.outcome === "unknown") return res.outcome;
+  return "unknown";
+}
+
+export function outcomeMissing(res: ExtendedSinkResult): boolean {
+  return res.outcome !== "delivered" && res.outcome !== "not_sent" && res.outcome !== "unknown";
 }

@@ -21,6 +21,9 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
   written before the report so a retry repairs its own crash windows. Webhook: only a provably unsent request
   is `not_sent`; any non-2xx answer or timeout is `unknown`. Sink types (`SinkContext`, `SinkDelivery`,
   `SinkResult`, `SinkOutcome`, `SinkState`) are exported from the package entry. Webhooks send `X-Wake-Grokbot-Delivery-Id`.
+- Reliability core (B3/B5 + expiry): business status is separate from sink delivery state; `send`/`ingest` both refuse a new expired id (exit 1, nothing written); recover never auto-resends webhook/command with unknown outcome; `status` prints `report=<delivery>` beside `status=done` so a pending/unknown/conflict report is never masked. Core calls the real `sinkReplaySafe` / `outcome` path (no optional import fallback); a missing `outcome` is a contract violation recorded as `unknown`.
+- Lock recovery note: a busy or unreadable per-path lock fails as `not_sent` with a basename-only hint (`<report>.lock`); wake-grokbot never deletes an unknown or live lock automatically.
+- Windows: the SIGKILL-based "dead lock holder is reclaimed / live holder is not stolen" case is skipped on win32 (`it.skipIf(process.platform === "win32")`); an alternate Windows verification is still pending.
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
 - Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`; a global install of another version is refused, never used.

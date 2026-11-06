@@ -89,7 +89,7 @@ For `reply_to.sink = "hufu-report"` (report layout `wake-report/1`, marker forma
    fails the delivery with outcome `not_sent` (retryable). A lock is never taken over because of its age: it is
    reclaimed only when its owner is provably gone (same host, pid no longer exists). A lock from another host, an
    unreadable lock, or a live (or possibly reused) pid stays; **manual recovery**: make sure no wake-grokbot process
-   is delivering to that path, delete `<report>.lock`, and let core retry the same delivery;
+   is delivering to that path, delete `<report>.lock`, and let core retry the same delivery; On Unix the reclaim path is covered by a SIGKILL child-process test; that case is skipped on Windows and still needs an alternate check.
 2. with a task delivery: write the intent `<report>.wake.json` (`wake-sink-state/1`, `phase: "intent"`: owner
    `task_id`, `revision`, `reply_id`, `reply_hash`, `status`, expected `report_sha256`) **before** the report;
 3. remove any old `<report>.DONE`, then write `<report>` atomically (non-terminal statuses: this is the
