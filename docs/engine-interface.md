@@ -87,9 +87,10 @@ For `reply_to.sink = "hufu-report"` (report layout `wake-report/1`, marker forma
 
 1. take a per-path lock `<report>.lock` (records host, pid, process start time and a random token). A busy lock
    fails the delivery with outcome `not_sent` (retryable). A lock is never taken over because of its age: it is
-   reclaimed only when its owner is provably gone (same host, pid no longer exists), and only while holding
-   `<report>.lock.reclaim`, re-checking the owner token first (a live lock is never moved or removed; a leftover
-   `.reclaim` file is not stolen either: delete it manually after checking no process is delivering). A lock from another host, an
+   reclaimed only when its owner is provably gone (same host, pid no longer exists), and only while holding the
+   reclaim mutex `<report>.lock.reclaim/` (a directory with one `owner-<token>` file), re-checking the owner token
+   first. A live lock is never moved or removed. A reclaim mutex whose holder is provably dead is cleared
+   automatically (only that holder's own file is removed). See "Lock files and manual recovery" below. A lock from another host, an
    unreadable lock, or a live (or possibly reused) pid stays; **manual recovery**: make sure no wake-grokbot process
    is delivering to that path (stop it first) and that the host/pid recorded in the lock is gone, then delete `<report>.lock` and let core retry the same delivery; On Unix the reclaim path is covered by a SIGKILL child-process test; that case is skipped on Windows and still needs an alternate check.
 2. with a task delivery: write the intent `<report>.wake.json` (`wake-sink-state/1`, `phase: "intent"`: owner
@@ -132,3 +133,33 @@ in the same `thread`. The reply envelope also lands in `msg/to-dispatcher/unread
 
 This loop is covered by `tests/report-loop.test.ts`, which runs it in a temp folder with the public fixture.
 See also [integrations.md](integrations.md) and [threat-model.md](threat-model.md).
+
+## Lock files and manual recovery
+
+wake-grokbot uses lock files next to the data they protect: `<state>/state.lock` (inbox state) and
+`<report>.lock` (report and file sinks), each with a reclaim mutex `<lock>.reclaim/`. Lock files contain
+`{"format":"wake-lock/1","host":…,"pid":…,"token":…}`; the mutex directory holds one `owner-<token>` file with
+the same identity.
+
+Automatic handling: a lock or mutex is removed only by its owner, or when its owner is provably gone (same host
+and the pid no longer exists). Never because of its age. A process releases its own lock without the mutex, so a
+stale mutex can never make a long-running process (for example `watch --interval`) lock itself out.
+
+Cases that need a person (the command fails with `state lock busy` (exit 3) or the sink with `not_sent`, both
+retryable, and the message names the file):
+- a lock or mutex from another host (shared or network folder), or one whose pid is alive (or reused);
+- an unreadable lock, or one in the old `<token> <pid>` format of earlier development builds (never removed
+  automatically: conservative compatibility);
+- a mutex directory with unexpected content.
+
+Procedure (before an upgrade, and whenever such a message appears):
+1. Stop every wake-grokbot process that uses this inbox or report folder (scheduled `watch`, engines, hooks).
+2. Read the file: check `host` and `pid`. On that host, confirm no process with that pid is a wake-grokbot/node
+   process for this inbox. If it is alive, do not delete anything: wait for it or stop it first.
+3. Only then delete `state.lock` / `<report>.lock` and the `.reclaim` directory next to it. Never delete a lock
+   whose owner you cannot identify while any related process may still run.
+4. Start the processes again; core retries the delivery.
+
+Windows: pid liveness uses the same check; equivalence of process termination on Windows is pending platform
+validation.
+

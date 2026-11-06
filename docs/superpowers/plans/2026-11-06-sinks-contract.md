@@ -125,6 +125,10 @@ the old needs_input `.DONE` behavior. Fault injection only via test setup (pre-m
    and sinks; `withLock` signature unchanged, `staleMs` ignored); own pid is always alive (no start-time estimate
    as death proof); release verifies its token under the same reclaim mutex; legacy/unknown lock formats are never
    deleted. `task` extra keys rejected at runtime (top-level and `task.ref` already were).
+   Revision 6 (R1): a stale `.reclaim` made release fail and left the lock, so a resident Engine locked itself out.
+   Now release needs no mutex (only the owner or a mutex-holding reclaimer of a dead owner may delete a lock),
+   the mutex is a directory taken by atomic rename of a filled temp dir, dead holders are cleared by removing only
+   their own `owner-<token>` file, and an in-process token registry lets a process remove its own leftover lock.
    Otherwise busy -> `not_sent`/`failed`, retryable, with a manual-recovery hint (documented in engine-interface §4).
 3. Crash windows: intent sidecar (phase `intent`, expected `report_sha256`) before the report; `committed` after;
    duplicate requires reply_id, status, actual report bytes, committed phase and marker all consistent; otherwise

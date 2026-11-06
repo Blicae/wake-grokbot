@@ -41,6 +41,10 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
   exists) under a `.reclaim` mutex with a token re-check; this process's own pid always counts as alive. A lock in
   the old `<token> <pid>` format, from another host or unreadable is never removed automatically: `state lock busy`
   (exit 3 as before) with a manual-recovery hint. This is a compatibility change: an old-format lock is no longer cleared for you. Before removing any lock by hand, stop every wake-grokbot process (and scheduled watch) that uses this state dir and confirm the owner host/pid recorded in the lock is gone; never delete a lock whose owner may still be alive, as that allows concurrent writes.
+  The reclaim mutex is a directory `<lock>.reclaim/` with one `owner-<token>` file; a dead holder is cleared
+  automatically. An owner releases its own lock without the mutex, and a lock this process failed to release is
+  removed by this process on its next attempt, so a stale mutex can no longer lock a resident `watch` out.
+  Manual procedure: docs/engine-interface.md, "Lock files and manual recovery".
 - `task` objects reject unknown keys at runtime (`unknown field: task.<key>`), like the schema.
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
