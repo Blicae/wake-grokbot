@@ -203,16 +203,74 @@ describe("webhook: unknown outcomes are never resent automatically", () => {
   });
 });
 
+describe("command sink: unknown outcomes are never re-run automatically", () => {
+  // a short local child process that only appends one byte to a counter file in the sandbox; no other side effect
+  const cmdSandbox = (exit: number) => {
+    const base = sandbox();
+    const counter = path.join(base.dir, "calls.txt");
+    const script = `require("fs").appendFileSync(${JSON.stringify(counter)}, "x"); process.exit(${exit});`;
+    const s = sandbox({ sinks: { commands: { c: { argv: [process.execPath, "-e", script], timeout_seconds: 10 } } } });
+    return { s, calls: () => (fs.existsSync(counter) ? fs.readFileSync(counter, "utf8").length : 0) };
+  };
+  const cmdTask = () => task({ reply_to: { sink: "command", command_ref: "c" } });
+
+  it("a failing command is unknown (exit 5); watch and recover do not run it again", async () => {
+    const { s, calls } = cmdSandbox(3);
+    const e = cmdTask();
+    await s.run(["send", "--json", "-"], JSON.stringify(e));
+    expect((await s.run(["reply", e.id, "--status", "done", "--summary", "x"])).code).toBe(5);
+    expect(calls()).toBe(1);
+    expect(receipt(s, e.id).replies[0].delivery.state).toBe("unknown");
+    await s.run(["watch", "--once"]);
+    await engine(s, { now: later }).recover();
+    await engine(s, { now: later }).recover();
+    expect(calls()).toBe(1);
+    expect((await s.run(["redeliver", receipt(s, e.id).replies[0].id])).code).toBe(1);
+    expect(calls()).toBe(1);
+  });
+
+  for (const point of ["reply:before-deliver", "reply:after-deliver"]) {
+    it(`${point}: crash → recover marks unknown and never re-runs the command`, async () => {
+      const { s, calls } = cmdSandbox(0);
+      const e = cmdTask();
+      await s.run(["send", "--json", "-"], JSON.stringify(e));
+      await expect(engine(s, { fault: crashAt(point) }).reply(e.id, { status: "done", summary: "x" })).rejects.toBeInstanceOf(Crash);
+      const before = calls();
+      expect(before).toBe(point === "reply:after-deliver" ? 1 : 0);
+      await engine(s, { now: later }).recover();
+      await s.run(["watch", "--once"]);
+      await engine(s, { now: later }).recover();
+      expect(calls()).toBe(before);
+      expect(receipt(s, e.id).replies[0].delivery.state).toBe("unknown");
+    });
+  }
+
+  it("the fault hook is not reachable from the CLI or the environment", async () => {
+    const src = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "main.ts"), "utf8");
+    expect(src).not.toMatch(/\bfault\b/);
+    const core = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "core.ts"), "utf8");
+    expect(core).not.toMatch(/env\[[^\]]*FAULT/i);
+  });
+});
+
 describe("expiry before execution (send / ingest / pump agree)", () => {
-  it("send keeps storing an expired envelope (compatible) but it is never woken; ingest still refuses it", async () => {
+  it("a new expired envelope is refused by send and ingest alike: exit 1, no envelope, receipt or queue entry", async () => {
     const srv = await stub(() => ({ status: 200 }));
     const s = sandbox({ ...grokCfg(), sources: { eng: { require_sig: false } } }, { WAKE_GROKBOT_URL: srv.url, WAKE_GROKBOT_KEY: KEY });
     const e = task({ expires_at: "2020-01-01T00:00:00Z" });
-    expect((await s.run(["send", "--json", "-"], JSON.stringify(e))).code).toBe(5);
-    expect(srv.hits).toHaveLength(0);
-    expect(receipt(s, e.id).wake).toMatchObject({ state: "not_started", detail: expect.stringMatching(/expired/) });
     const i = task({ from: "eng", expires_at: "2020-01-01T00:00:00Z" });
-    expect((await s.run(["ingest", "--from", "eng", "-"], JSON.stringify(i))).code).toBe(1);
+    const a = await s.run(["send", "--json", "-"], JSON.stringify(e));
+    const b = await s.run(["ingest", "--from", "eng", "-"], JSON.stringify(i));
+    for (const [r, id] of [[a, e.id], [b, i.id]] as const) {
+      expect(r.code).toBe(1);
+      expect(r.err).toMatch(/expired at .*nothing written/);
+      for (const side of ["to-worker", "to-dispatcher"])
+        for (const sub of ["unread", "read"]) expect(fs.existsSync(path.join(s.inbox, "msg", side, sub, `${id}.json`))).toBe(false);
+      expect(fs.existsSync(path.join(s.inbox, "receipts", `${id}.json`))).toBe(false);
+      const ob = path.join(s.state, "outbox.json");
+      if (fs.existsSync(ob)) expect(fs.readFileSync(ob, "utf8")).not.toContain(id);
+    }
+    expect(srv.hits).toHaveLength(0);
   });
 
   it("queued, then expired before the wake: not woken (not_started, expired reason), business status unchanged", async () => {

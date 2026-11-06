@@ -5,6 +5,14 @@ import { fixture, sandbox, task, uuid } from "./helpers.js";
 const PAST = "2000-01-01T00:00:00Z";
 const FUTURE = "2999-01-01T00:00:00Z";
 
+/** Accept through the engine with a clock one minute before PAST: "accepted while still valid". */
+async function acceptBefore(s: ReturnType<typeof sandbox>, e: Record<string, unknown>) {
+  const { loadConfig } = await import("../src/config.js");
+  const { Engine } = await import("../src/core.js");
+  const eng = new Engine(loadConfig({ config: s.cfgPath, env: s.env }), { env: s.env, now: () => Date.parse(PAST) - 60_000 });
+  return eng.accept(structuredClone(e), { rejectExpired: true });
+}
+
 describe("expires_at (optional replay/staleness window)", () => {
   it("validator accepts an ISO time and rejects anything else", () => {
     expect(validate(fixture("task-expires.json"))).toEqual([]);
@@ -21,7 +29,8 @@ describe("expires_at (optional replay/staleness window)", () => {
     const s = sandbox();
     const old = task({ expires_at: PAST });
     const fresh = task({ expires_at: FUTURE });
-    expect((await s.run(["send", "--json"], JSON.stringify(old))).code).toBe(0);
+    // accepted while still valid (injected clock), expired by now; a new expired send is refused (see below)
+    expect((await acceptBefore(s, old)).code).toBe(0);
     expect((await s.run(["send", "--json"], JSON.stringify(fresh))).code).toBe(0);
     const t = await s.run(["status", old.id]);
     expect(t.code).toBe(0);
@@ -34,7 +43,7 @@ describe("expires_at (optional replay/staleness window)", () => {
   it("a settled envelope is not flagged even when expired", async () => {
     const s = sandbox();
     const e = task({ expires_at: PAST });
-    await s.run(["send", "--json"], JSON.stringify(e));
+    expect((await acceptBefore(s, e)).code).toBe(0);
     await s.run(["reply", e.id, "--status", "done", "--summary", "ok"]);
     expect((await s.run(["status", e.id])).out).not.toContain("EXPIRED");
     expect((await s.run(["status"])).out).not.toContain("expired:");
@@ -42,7 +51,7 @@ describe("expires_at (optional replay/staleness window)", () => {
   it("status overview and watch --once list expired envelopes", async () => {
     const s = sandbox();
     const e = task({ expires_at: PAST });
-    await s.run(["send", "--json"], JSON.stringify(e));
+    expect((await acceptBefore(s, e)).code).toBe(0);
     await s.run(["send", "--json"], JSON.stringify(task({ id: uuid() })));
     const o = await s.run(["status"]);
     expect(o.out).toContain(`expired: ${e.id} (expires_at ${PAST}, status queued)`);
