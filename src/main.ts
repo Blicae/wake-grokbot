@@ -296,11 +296,14 @@ async function run(argv: string[], io: Io): Promise<number> {
 }
 
 /** Delivery of the latest reply to the task's sink; shown apart from status so `done` never reads as "report arrived". */
-function reportState(r: { replies: { delivery?: { state: string; sink_state?: string; detail?: string } }[] }): string {
-  const d = [...r.replies].reverse().find((x) => x.delivery)?.delivery;
-  if (!d) return "";
+function reportState(r: { replies: { id: string; delivery?: { state: string; sink_state?: string; detail?: string } }[] }): string {
+  const x = [...r.replies].reverse().find((x) => x.delivery);
+  const d = x?.delivery;
+  if (!x || !d) return "";
   const sink = d.sink_state && d.sink_state !== d.state ? `/${d.sink_state}` : "";
-  return ` report=${d.state}${sink}`;
+  // "failed" is not "delivered": the reply is kept and can be repaired by hand
+  const fix = d.state === "failed" ? ` (not delivered, needs repair: redeliver ${x.id})` : "";
+  return ` report=${d.state}${sink}${fix}`;
 }
 
 /** Envelopes past their `expires_at` that are not settled yet (no done/failed/declined). Read-only. */

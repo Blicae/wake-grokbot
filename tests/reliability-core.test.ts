@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { Engine } from "../src/core.js";
+import { _setCoreTestHooks, type CoreTestHooks } from "../src/testhooks.js";
 import { grokCfg, KEY, sandbox, stub, task, uuid } from "./helpers.js";
 
 class Crash extends Error {}
@@ -15,8 +16,12 @@ const crashAt = (point: string) => (p: string) => {
   if (p === point) throw new Crash(`simulated crash at ${p}`);
 };
 type S = ReturnType<typeof sandbox>;
-const engine = (s: S, o: ConstructorParameters<typeof Engine>[1] = {}) =>
-  new Engine(loadConfig({ config: s.cfgPath, env: s.env }), { env: s.env, ...o });
+const engine = (s: S, o: NonNullable<ConstructorParameters<typeof Engine>[1]> & CoreTestHooks = {}) => {
+  const { fault, deliverFn, onDeliver, ...opts } = o;
+  const eng = new Engine(loadConfig({ config: s.cfgPath, env: s.env }), { env: s.env, ...opts });
+  _setCoreTestHooks(eng, { fault, deliverFn, onDeliver });
+  return eng;
+};
 const later = () => Date.now() + 3600_000; // "after a restart, long after the crash"
 const files = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".json") && !f.endsWith(".wake.json")) : []);
 const receipt = (s: S, id: string) => JSON.parse(fs.readFileSync(path.join(s.inbox, "receipts", `${id}.json`), "utf8"));
@@ -197,7 +202,7 @@ describe("webhook: unknown outcomes are never resent automatically", () => {
     await s.run(["send", "--json", "-"], JSON.stringify(e));
     const eng = engine(s);
     const seen: unknown[] = [];
-    eng.onDeliver = (ctx) => seen.push(ctx.delivery);
+    _setCoreTestHooks(eng, { onDeliver: (ctx) => seen.push(ctx.delivery) });
     await eng.reply(e.id, { status: "done", summary: "x" });
     expect(seen).toEqual([{ taskId: e.id, replyHash: expect.stringMatching(/.+/), revision: 1 }]);
   });

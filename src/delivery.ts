@@ -31,6 +31,8 @@ export interface DeliveryRecord {
   at?: string;
   detail?: string;
   sink_state?: SinkState;
+  /** The sink returned no `outcome`: never replayed automatically, even for a replay-safe sink. */
+  contract_violation?: boolean;
 }
 
 /** A reply in progress, written before any other file of the reply; removed once settled. */

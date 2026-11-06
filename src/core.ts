@@ -9,9 +9,10 @@ import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, v
 import { atomicCreate, readJson, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
-import { type DeliveryContext, type DeliveryRecord, OUTCOME_MISSING_DETAIL, outcomeMissing, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
-import { deliver, type SinkContext } from "./sinks.js";
+import { type DeliveryRecord, OUTCOME_MISSING_DETAIL, outcomeMissing, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
+import { deliver } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
+import { coreTestHooks } from "./testhooks.js";
 
 /** Rate-limited wakes without Retry-After back off 15, 30, 60 ... minutes (ordinary 4xx: 1, 2, 4 ... 60). */
 const RATE_LIMIT_START_MINUTES = 15;
@@ -23,16 +24,9 @@ export interface EngineOptions {
   env?: NodeJS.ProcessEnv;
   stdinKey?: string;
   now?: () => number;
-  /** Test-only crash injection: called at each persistence point; throwing simulates a crash there. Off by default. */
-  fault?: (point: string) => void;
-  /**
-   * Test-only replace for `deliver`. Defaults to the real sinks `deliver`. Never read from CLI/env/config.
-   * Used to assert contract handling (e.g. a result with no `outcome`).
-   */
-  deliverFn?: typeof deliver;
 }
 
-/** An attempt older than this with no recorded result belongs to a dead process. */
+/** An open delivery attempt is treated as belonging to a dead process only after max(timeout x 3, this). */
 const STALE_ATTEMPT_MIN_MS = 10 * 60_000;
 
 export interface Result {
@@ -61,11 +55,28 @@ export class Engine {
     this.now = opts.now ?? Date.now;
   }
 
-  /** Test hook: sees every sink context the core passes to `deliver`. */
-  onDeliver?: (ctx: SinkContext & { delivery: DeliveryContext }) => void;
-
   private fault(point: string): void {
-    this.opts.fault?.(point);
+    coreTestHooks(this)?.fault?.(point);
+  }
+
+  /** One rule for recover and redeliver: an open attempt younger than max(timeout x 3, 10 min) may still be live. */
+  private attemptLive(d: DeliveryRecord): boolean {
+    if (!d.attempt_started_at) return false;
+    const staleMs = Math.max(this.cfg.wake.timeout_seconds * 3000, STALE_ATTEMPT_MIN_MS);
+    return this.now() - Date.parse(d.attempt_started_at) < staleMs;
+  }
+
+  /** The delivery record of a reply, wherever its task receipt is. Call under the lock. */
+  private findDelivery(replyId: string): DeliveryRecord | undefined {
+    const rdir = path.join(this.store.inbox, "receipts");
+    if (!fs.existsSync(rdir)) return undefined;
+    for (const f of fs.readdirSync(rdir)) {
+      if (!f.endsWith(".json") || f.startsWith(".")) continue;
+      const r = this.store.readReceipt(f.slice(0, -5));
+      const rec = r?.replies.find((x) => x.id === replyId);
+      if (rec?.delivery) return rec.delivery;
+    }
+    return undefined;
   }
 
   get cfg() {
@@ -420,6 +431,8 @@ export class Engine {
         return pending;
       }
       const task = this.store.readReceipt(id);
+      if (task && isTerminal(task.status as Status) && !isTerminal(reply.status))
+        throw rule(`task ${id} is already ${task.status} (terminal); a non-terminal reply (${reply.status}) is refused; nothing written`);
       const revision = Math.max(task?.last_revision ?? 0, ...(task?.replies ?? []).map((x) => x.revision ?? 0), task?.replies.length ?? 0) + 1;
       if (task) {
         task.last_revision = revision;
@@ -444,12 +457,14 @@ export class Engine {
     let code: number = EXIT.OK;
     let msg = `replied to ${id} with ${reply.status} (${reply.id})`;
     if (intent.reply_to) {
-      const d = await this.deliverIntent(intent);
+      const d = (await this.deliverIntent(intent)) ?? this.store.lock(() => this.currentDelivery(intent));
       if (d) {
         const sinkLabel =
           d.state === "delivered"
             ? "delivered"
-            : d.state === "unknown"
+            : d.attempt_started_at
+              ? "attempt in progress (not confirmed)"
+              : d.state === "unknown"
               ? "outcome UNKNOWN (not resent automatically)"
               : d.state === "not_sent"
                 ? d.sink_state === "conflict"
@@ -457,9 +472,11 @@ export class Engine {
                   : d.sink_state === "superseded"
                     ? "not sent (superseded)"
                     : "not sent"
-                : "FAILED";
+                : d.state === "pending"
+                  ? "pending"
+                  : "FAILED (needs repair: redeliver " + intent.replyId + ")";
         msg += `; sink ${sinkLabel}: ${d.detail ?? ""}`;
-        if (d.state !== "delivered") code = EXIT.NOT_WOKEN;
+        if (d.state !== "delivered" && !isSettled(d)) code = EXIT.NOT_WOKEN;
       }
     }
     for (const t of new Set([...freed, ...(target ? [target] : [])])) await this.pump(t);
@@ -485,7 +502,7 @@ export class Engine {
     this.fault("reply:after-enqueue");
     const r = this.store.readReceipt(i.taskId);
     if (r && !r.replies.some((x) => x.id === reply.id)) {
-      if (i.revision > (r.status_revision ?? 0)) {
+      if (i.revision > (r.status_revision ?? 0) && !(isTerminal(r.status as Status) && !isTerminal(reply.status))) {
         r.status = reply.status!;
         r.next = reply.next;
         r.status_revision = i.revision;
@@ -533,8 +550,9 @@ export class Engine {
       timeoutMs: this.cfg.wake.timeout_seconds * 1000,
       delivery: { taskId: i.taskId, replyHash: i.hash, revision: i.revision },
     };
-    this.onDeliver?.(ctx);
-    const deliverFn = this.opts.deliverFn ?? deliver;
+    const hooks = coreTestHooks(this);
+    hooks?.onDeliver?.(ctx);
+    const deliverFn = hooks?.deliverFn ?? deliver;
     const res = await deliverFn(i.reply, to, ctx);
     this.fault("reply:after-deliver");
     return this.store.lock(() => {
@@ -545,14 +563,18 @@ export class Engine {
       const outcome = outcomeOf(res);
       const d = rec.delivery;
       delete d.attempt_started_at;
-      d.state = outcome === "not_sent" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
+      d.state = outcome === "not_sent" && res.state !== "superseded" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
       d.at = new Date(this.now()).toISOString();
       d.detail = missing ? (res.detail ? `${res.detail}; ${OUTCOME_MISSING_DETAIL}` : OUTCOME_MISSING_DETAIL) : res.detail;
       const st = res.state;
       if (st) d.sink_state = st;
+      if (missing) d.contract_violation = true;
+      else delete d.contract_violation;
       rec.sink_result = (outcome === "delivered" ? "ok: " : "failed: ") + (d.detail ?? "");
       this.store.writeReceipt(r);
-      if (d.state !== "not_sent" && d.state !== "unknown") this.store.removeIntent(i.replyId);
+      // the intent (original reply, hash, revision) stays until the delivery is settled, so a manual redeliver can always
+      // repair it; only delivered / superseded are settled
+      if (d.state === "delivered" || isSettled(d)) this.store.removeIntent(i.replyId);
       this.store.log("delivery", {
         task: i.taskId,
         reply: i.replyId,
@@ -564,6 +586,12 @@ export class Engine {
     });
   }
 
+  /** The stored delivery record of an intent (nothing sent). Call under the lock. */
+  private currentDelivery(i: ReplyIntent): DeliveryRecord | null {
+    const r = this.store.readReceipt(i.taskId);
+    return r?.replies.find((x) => x.id === i.replyId)?.delivery ?? null;
+  }
+
   /**
    * Repair what a crash left behind, idempotently: envelopes without receipts, receipts lost from the queue,
    * half-written replies, and reply deliveries. An open attempt of a sink that is not replay-safe becomes
@@ -571,7 +599,6 @@ export class Engine {
    */
   async recover(): Promise<{ repaired: string[]; delivered: string[] }> {
     const repaired: string[] = [];
-    const staleMs = Math.max(this.cfg.wake.timeout_seconds * 3000, STALE_ATTEMPT_MIN_MS);
     const todo = this.store.lock(() => {
       this.store.ensure();
       const intents = this.store.listIntents();
@@ -606,7 +633,7 @@ export class Engine {
         const d = rec?.delivery;
         if (!r || !d) continue;
         if (d.attempt_started_at) {
-          if (this.now() - Date.parse(d.attempt_started_at) < staleMs) continue; // maybe still running elsewhere
+          if (this.attemptLive(d)) continue; // maybe still running elsewhere
           delete d.attempt_started_at;
           if (replaySafe(i.reply_to)) d.state = "pending";
           else {
@@ -617,8 +644,22 @@ export class Engine {
           }
           this.store.writeReceipt(r);
           repaired.push(i.replyId);
+        } else if (d.state === "unknown" && !d.contract_violation && replaySafe(i.reply_to)) {
+          // a replay-safe (file / report) sink may be re-applied idempotently whatever made it unknown, up to max_attempts;
+          // outside side effects (webhook / command) stay unknown and are never resent automatically
+          if (d.attempts < this.cfg.wake.max_attempts) d.state = "pending";
+          else {
+            d.state = "failed";
+            d.detail = `${d.detail ?? "outcome unknown"}; gave up after ${d.attempts} attempts (use redeliver)`;
+            rec.sink_result = "failed: " + d.detail;
+          }
+          this.store.writeReceipt(r);
+          repaired.push(i.replyId);
+        } else if (isSettled(d)) {
+          this.store.removeIntent(i.replyId);
+          continue;
         }
-        if (d.state === "pending" || d.state === "not_sent") out.push(i);
+        if ((d.state === "pending" || d.state === "not_sent") && !d.attempt_started_at) out.push(i);
       }
       return out;
     });
@@ -634,14 +675,20 @@ export class Engine {
   /** Manual redelivery of one reply. An unknown outcome of a sink with outside side effects needs `acceptRisk`. */
   async redeliver(replyId: string, o: { acceptRisk?: boolean } = {}): Promise<Result> {
     const i = this.store.readIntent(replyId);
-    if (!i?.reply_to) throw rule(`no undelivered reply ${replyId} (already delivered, or no sink)`);
+    if (!i?.reply_to) {
+      const d = this.store.lock(() => this.findDelivery(replyId));
+      if (d?.state === "delivered") throw rule(`${replyId} was already delivered`);
+      if (d && isSettled(d)) throw rule(`${replyId} was superseded by a later terminal reply; nothing to send`);
+      throw rule(`no undelivered reply ${replyId} (no sink, or unknown id)`);
+    }
     this.store.lock(() => {
       const r = this.store.readReceipt(i.taskId);
       const rec = r?.replies.find((x) => x.id === replyId);
       const d = rec?.delivery;
       if (!r || !d) throw rule(`no delivery record for ${replyId}`);
       if (d.state === "delivered") throw rule(`${replyId} was already delivered`);
-      if (d.attempt_started_at && this.now() - Date.parse(d.attempt_started_at) < STALE_ATTEMPT_MIN_MS)
+      if (isSettled(d)) throw rule(`${replyId} was superseded by a later terminal reply; nothing to send`);
+      if (this.attemptLive(d))
         throw rule(`${replyId}: a delivery attempt is in progress`);
       if ((d.state === "unknown" || d.attempt_started_at) && !replaySafe(i.reply_to!) && !o.acceptRisk)
         throw rule(
@@ -743,6 +790,11 @@ export class Engine {
       return r;
     });
   }
+}
+
+/** Superseded by a later terminal reply: handled safely, nothing to send, never retried. */
+function isSettled(d: DeliveryRecord): boolean {
+  return d.state === "not_sent" && d.sink_state === "superseded";
 }
 
 function summarize(e: Envelope | null): string {

@@ -10,6 +10,13 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Grok Bot wake channel: Bearer key, summary-only payload, redirects refused, rate caps, outbox with backoff and a dead state, coalescing, kill switch.
 - Generic `script` wake channel.
 - Reply sinks: `file`, `webhook` (HMAC-SHA256), `command`, `hufu-report` (report file plus `.DONE` marker).
+- Reply delivery (audit repair): after a terminal status (`done`/`failed`/`declined`) a new non-terminal reply is
+  refused with exit 1 and nothing is written; an older reply superseded by a terminal one is settled, never retried.
+  Re-running the same reply never reports a delivery that is not confirmed (exit 5, `unknown` / `FAILED` shown).
+  `recover` re-applies replay-safe sinks (`file`, `hufu-report`) whose outcome is `unknown` (up to `max_attempts`);
+  `webhook`/`command` unknowns are still never resent automatically. A delivery that gave up stays `failed` with its
+  original reply, hash and revision, and `redeliver` can repair it; `recover` and `redeliver` treat an open attempt as
+  live for the same `max(timeout_seconds x 3, 10 min)`.
 - Sinks contract v1 (unreleased 0.1, **breaking for `.DONE` readers** of earlier development builds): `.DONE` is
   written only for terminal statuses (`done`, `failed`, `declined`), never for `working`/`needs_input`/`blocked`;
   its format is now `wake-report-done/1` (`format`, `id`, `status`, `at`, plus `task_id`, `revision`, `reply_hash`,
