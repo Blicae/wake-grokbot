@@ -97,7 +97,14 @@ function processStart(): number {
 }
 
 /** Test-only interleaving point (not exported from the package entry; not reachable from CLI, env or config). */
-export const _lockTestHooks: { reclaim?: (phase: "checked" | "holding") => void; release?: () => void } = {};
+export const _lockTestHooks: {
+  reclaim?: (phase: "checked" | "holding") => void;
+  release?: () => void;
+  /** replaces the directory rename that takes the reclaim mutex (simulates other platforms' rename semantics) */
+  renameDir?: (src: string, dst: string) => void;
+  /** replaces the exclusive create of the lock file (simulates EPERM/EACCES conflicts) */
+  createExclusive?: (file: string, data: string) => void;
+} = {};
 
 /** Tokens of locks this process created, shared by all module copies: "leftover" = its release failed. */
 const REG_KEY = Symbol.for("wake-grokbot.lock-tokens");
@@ -112,6 +119,15 @@ function readText(file: string): string | undefined {
     return fs.readFileSync(file, "utf8");
   } catch {
     return undefined;
+  }
+}
+/** lstat-based existence: a path that exists but cannot be stat'ed (EPERM/EACCES/EBUSY) counts as existing. */
+function pathExists(file: string): boolean {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ENOENT";
   }
 }
 function parseOwner(text: string | undefined): LockOwner | undefined {
@@ -148,11 +164,31 @@ function takeReclaim(lockFile: string, me: LockOwner, manual: string): { release
   const name = path.basename(dir);
   const mine = `owner-${me.token}`;
   for (let i = 0; i < 4; i++) {
+    // Never rename onto a regular file: Windows lets rename(dir, file) overwrite it. A file-form mutex (earlier
+    // development builds) follows the live/dead rules: live, unknown or foreign = busy; proven dead = removed.
+    let pre: fs.Stats | undefined;
+    try {
+      pre = fs.lstatSync(dir);
+    } catch {
+      pre = undefined;
+    }
+    if (pre && !pre.isDirectory()) {
+      const holder = parseOwner(readText(dir));
+      if (!holder) return { busy: `reclaim mutex ${name} is unreadable; ${manual} and ${name}` };
+      const g = ownerGone(holder);
+      if (!g.gone) return { busy: `reclaim mutex ${name} is held (${g.why}); ${manual} and ${name}` };
+      try {
+        fs.unlinkSync(dir); // never removes a directory (a new holder)
+      } catch {
+        /* gone or replaced */
+      }
+      continue;
+    }
     const tmpDir = `${dir}.tmp-${me.token}`;
     fs.mkdirSync(tmpDir);
     try {
       fs.writeFileSync(path.join(tmpDir, mine), JSON.stringify(me) + "\n");
-      renameRetry(tmpDir, dir);
+      (_lockTestHooks.renameDir ?? renameRetry)(tmpDir, dir);
       return {
         release: () => {
           fs.rmSync(path.join(dir, mine), { force: true });
@@ -202,16 +238,7 @@ function takeReclaim(lockFile: string, me: LockOwner, manual: string): { release
       }
       continue;
     }
-    // a plain-file mutex from an earlier development build
-    const holder = parseOwner(readText(dir));
-    if (!holder) return { busy: `reclaim mutex ${name} is unreadable; ${manual} and ${name}` };
-    const g = ownerGone(holder);
-    if (!g.gone) return { busy: `reclaim mutex ${name} is held (${g.why}); ${manual}` };
-    try {
-      fs.unlinkSync(dir); // never removes a directory (a new holder)
-    } catch {
-      /* gone or replaced */
-    }
+    // a non-directory appeared after the check: handled at the top of the next round
   }
   return { busy: `reclaim mutex ${name} is contended; ${manual}` };
 }
@@ -231,9 +258,12 @@ export function tryLock(lockFile: string): { release: () => void } | { busy: str
   const name = path.basename(lockFile);
   const manual = `retryable; if no wake-grokbot process holds it, remove ${name} manually`;
   const reg = registry();
+  let permRetries = 0;
   for (let i = 0; i < 3; i++) {
     try {
-      fs.writeFileSync(lockFile, JSON.stringify(me) + "\n", { flag: "wx" });
+      const data = JSON.stringify(me) + "\n";
+      if (_lockTestHooks.createExclusive) _lockTestHooks.createExclusive(lockFile, data);
+      else fs.writeFileSync(lockFile, data, { flag: "wx" });
       reg.set(me.token, "held");
       return {
         release: () => {
@@ -247,7 +277,18 @@ export function tryLock(lockFile: string): { release: () => void } | { busy: str
         },
       };
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EACCES") {
+        // Windows reports a conflict on the path (open handle, delete pending) as EPERM/EACCES. Treat it as a
+        // conflict only with evidence: the path exists, or it vanishes and a retry succeeds; otherwise it is a
+        // real permission problem and is thrown.
+        if (!pathExists(lockFile)) {
+          if (++permRetries > 5) throw e;
+          sleepSync(10 * permRetries);
+          i--;
+          continue;
+        }
+      } else if (code !== "EEXIST") throw e;
     }
     const text = readText(lockFile);
     if (text === undefined) continue; // released meanwhile
