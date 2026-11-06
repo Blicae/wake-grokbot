@@ -41,6 +41,8 @@ Commands:
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
+  redeliver <reply-id> [--accept-duplicate-risk]
+                              send one reply to its sink again by hand (unknown outcomes need the risk flag)
   release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
   prune [--days 30] [--apply] list (or delete) settled read messages, receipts and replies older than N days
   init [--print-config] [--force]         write an example config and create the inbox
@@ -92,6 +94,7 @@ const OPTIONS = {
   interval: { type: "string" },
   "print-config": { type: "boolean" },
   force: { type: "boolean" },
+  "accept-duplicate-risk": { type: "boolean" },
 } as const;
 
 async function readInput(io: Io, src: string | undefined): Promise<string> {
@@ -189,7 +192,7 @@ async function run(argv: string[], io: Io): Promise<number> {
         };
         if ((env as Envelope).type === "task" && !o.objective && body === undefined) (env as Envelope).objective = o.title;
       }
-      return print(await eng.accept(env, { noWake: o["no-wake"] }));
+      return print(await eng.accept(env, { noWake: o["no-wake"], rejectExpired: true }));
     }
     case "ingest": {
       if (!o.from) throw usage("ingest needs --from <source name>");
@@ -219,7 +222,7 @@ async function run(argv: string[], io: Io): Promise<number> {
       if (!r) throw new CliError(`no such id: ${id}`, EXIT.RULE);
       const env = eng.store.readEnvelope(id);
       const expired = !isTerminal(r.status === "queued" ? undefined : r.status) && isExpired(env);
-      const line = `${r.id} ${r.type} ${r.from}->${r.to} status=${r.status} wake=${r.wake.state}${r.wake.detail ? ` (${r.wake.detail})` : ""}${r.next ? ` next=${r.next}` : ""}${expired ? ` EXPIRED (expires_at ${env!.expires_at})` : ""}`;
+      const line = `${r.id} ${r.type} ${r.from}->${r.to} status=${r.status} wake=${r.wake.state}${r.wake.detail ? ` (${r.wake.detail})` : ""}${r.next ? ` next=${r.next}` : ""}${expired ? ` EXPIRED (expires_at ${env!.expires_at})` : ""}${reportState(r)}`;
       return print({ code: 0, receipt: r, message: line }, expired ? { expired: true, expires_at: env!.expires_at } : {});
     }
     case "ack": {
@@ -251,12 +254,20 @@ async function run(argv: string[], io: Io): Promise<number> {
       const interval = Number(o.interval ?? 60);
       if (!Number.isFinite(interval) || interval < 5) throw usage("--interval must be >= 5 seconds");
       for (;;) {
+        const rec = await eng.recover();
+        for (const id of rec.repaired) io.out(`${new Date().toISOString()} recovered: ${id}\n`);
+        for (const id of rec.delivered) io.out(`${new Date().toISOString()} reply delivered: ${id}\n`);
         const ev = await eng.pump();
         for (const e of ev) io.out(`${new Date().toISOString()} ${e.target}: ${e.state} ${e.detail}\n`);
         for (const x of expiredOpen(eng)) io.out(`${new Date().toISOString()} expired: ${x.id} (expires_at ${x.expires_at}, status ${x.status})\n`);
         if (o.once) return 0;
         await new Promise((r) => setTimeout(r, interval * 1000));
       }
+    }
+    case "redeliver": {
+      const id = pos[0];
+      if (!id) throw usage("redeliver <reply-id> [--accept-duplicate-risk]");
+      return print(await eng.redeliver(id, { acceptRisk: !!o["accept-duplicate-risk"] }));
     }
     case "release": {
       const r = await eng.release(o.target ?? pos[0]);
@@ -282,6 +293,12 @@ async function run(argv: string[], io: Io): Promise<number> {
     default:
       throw usage(`unknown command ${cmd}; see ${PROG} --help`);
   }
+}
+
+/** Delivery of the latest reply to the task's sink; shown apart from status so `done` never reads as "report arrived". */
+function reportState(r: { replies: { delivery?: { state: string } }[] }): string {
+  const d = [...r.replies].reverse().find((x) => x.delivery)?.delivery;
+  return d ? ` report=${d.state}` : "";
 }
 
 /** Envelopes past their `expires_at` that are not settled yet (no done/failed/declined). Read-only. */
