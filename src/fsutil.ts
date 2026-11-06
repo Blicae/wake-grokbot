@@ -97,7 +97,15 @@ function processStart(): number {
 }
 
 /** Test-only interleaving point (not exported from the package entry; not reachable from CLI, env or config). */
-export const _lockTestHooks: { reclaim?: (phase: "checked") => void } = {};
+export const _lockTestHooks: { reclaim?: (phase: "checked" | "holding") => void; release?: () => void } = {};
+
+/** Tokens of locks this process created, shared by all module copies: "leftover" = its release failed. */
+const REG_KEY = Symbol.for("wake-grokbot.lock-tokens");
+function registry(): Map<string, "held" | "leftover"> {
+  const g = globalThis as Record<symbol, unknown>;
+  if (!(g[REG_KEY] instanceof Map)) g[REG_KEY] = new Map<string, "held" | "leftover">();
+  return g[REG_KEY] as Map<string, "held" | "leftover">;
+}
 
 function readText(file: string): string | undefined {
   try {
@@ -129,46 +137,112 @@ function ownerGone(o: LockOwner): { gone: boolean; why: string } {
   }
 }
 
-/** Take `<lock>.reclaim` (exclusive create), waiting at most `waitMs`. Returns its release, or undefined. */
-function takeReclaim(lockFile: string, me: LockOwner, waitMs: number): (() => void) | undefined {
-  const reclaim = `${lockFile}.reclaim`;
-  const deadline = Date.now() + waitMs;
-  for (;;) {
+/**
+ * Reclaim mutex: the directory `<lock>.reclaim` holding exactly one `owner-<token>` file (wake-lock/1 identity).
+ * Taken by renaming a private, already filled temp directory onto that path (atomic; fails while a holder's file
+ * is in it), so a holder is never displaced. A dead holder (same host, pid gone) is cleared by removing exactly its
+ * own `owner-<token>` file, then the directory only if empty: a new holder's file is never touched. No nested mutex.
+ */
+function takeReclaim(lockFile: string, me: LockOwner, manual: string): { release: () => void } | { busy: string } {
+  const dir = `${lockFile}.reclaim`;
+  const name = path.basename(dir);
+  const mine = `owner-${me.token}`;
+  for (let i = 0; i < 4; i++) {
+    const tmpDir = `${dir}.tmp-${me.token}`;
+    fs.mkdirSync(tmpDir);
     try {
-      fs.writeFileSync(reclaim, JSON.stringify(me) + "\n", { flag: "wx" });
-      return () => {
-        if (parseOwner(readText(reclaim))?.token === me.token) fs.rmSync(reclaim, { force: true });
+      fs.writeFileSync(path.join(tmpDir, mine), JSON.stringify(me) + "\n");
+      renameRetry(tmpDir, dir);
+      return {
+        release: () => {
+          fs.rmSync(path.join(dir, mine), { force: true });
+          try {
+            fs.rmdirSync(dir); // only if empty
+          } catch {
+            /* a new holder is already in */
+          }
+        },
       };
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const code = (e as NodeJS.ErrnoException).code ?? "";
+      if (!["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR", "EPERM", "EACCES"].includes(code)) throw e;
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-    if (Date.now() >= deadline) return undefined;
-    sleepSync(5);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(dir);
+    } catch {
+      continue; // released meanwhile
+    }
+    if (st.isDirectory()) {
+      let entries: string[];
+      try {
+        entries = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      if (entries.length === 0) {
+        try {
+          fs.rmdirSync(dir); // abandoned between a holder's unlink and rmdir
+        } catch {
+          /* someone moved in */
+        }
+        continue;
+      }
+      const holder = entries.length === 1 ? parseOwner(readText(path.join(dir, entries[0]!))) : undefined;
+      if (!holder || entries[0] !== `owner-${holder.token}`) return { busy: `reclaim mutex ${name} has unexpected content; ${manual} and ${name}` };
+      const g = ownerGone(holder);
+      if (!g.gone) return { busy: `reclaim mutex ${name} is held (${g.why}); ${manual}` };
+      fs.rmSync(path.join(dir, entries[0]!), { force: true });
+      try {
+        fs.rmdirSync(dir);
+      } catch {
+        /* someone moved in */
+      }
+      continue;
+    }
+    // a plain-file mutex from an earlier development build
+    const holder = parseOwner(readText(dir));
+    if (!holder) return { busy: `reclaim mutex ${name} is unreadable; ${manual} and ${name}` };
+    const g = ownerGone(holder);
+    if (!g.gone) return { busy: `reclaim mutex ${name} is held (${g.why}); ${manual}` };
+    try {
+      fs.unlinkSync(dir); // never removes a directory (a new holder)
+    } catch {
+      /* gone or replaced */
+    }
   }
+  return { busy: `reclaim mutex ${name} is contended; ${manual}` };
 }
 
 /**
- * One attempt at a cross-process lock file. Never steals by age. A lock is removed only by its owner or by a
- * reclaimer holding `<lock>.reclaim` that re-read the token of a provably dead owner, so a live lock is never
- * moved or removed. Unknown/legacy, other-host, live or own-pid locks: busy, with a manual-recovery hint.
+ * One attempt at a cross-process lock file. Never steals by age. Who may delete `<lock>`:
+ * - its owner, after reading its own token (no mutex needed: nobody else ever deletes a live owner's lock, so the
+ *   file read is still the owner's at unlink time);
+ * - a reclaimer holding the reclaim mutex, after re-reading the token of a provably dead owner (same host, pid gone)
+ *   under that mutex; only one reclaimer can be in that section, and the dead owner cannot act.
+ * Unknown/legacy, other-host, live or own-pid locks are never deleted: busy, with a manual-recovery hint. The one
+ * exception is a lock of this process whose release failed (in-process registry): this process removes it.
  */
 export function tryLock(lockFile: string): { release: () => void } | { busy: string } {
   fs.mkdirSync(path.dirname(lockFile), { recursive: true });
   const me: LockOwner = { format: LOCK_FORMAT, host: os.hostname(), pid: process.pid, started_at: processStart(), token: randomUUID() };
   const name = path.basename(lockFile);
   const manual = `retryable; if no wake-grokbot process holds it, remove ${name} manually`;
+  const reg = registry();
   for (let i = 0; i < 3; i++) {
     try {
       fs.writeFileSync(lockFile, JSON.stringify(me) + "\n", { flag: "wx" });
+      reg.set(me.token, "held");
       return {
         release: () => {
-          // same protocol as a reclaimer: verify our token under the reclaim mutex, then delete
-          const done = takeReclaim(lockFile, me, 2000);
-          if (!done) return; // left in place; reclaimable once this process has exited
           try {
+            _lockTestHooks.release?.();
             if (parseOwner(readText(lockFile))?.token === me.token) fs.rmSync(lockFile, { force: true });
-          } finally {
-            done();
+            reg.delete(me.token);
+          } catch {
+            reg.set(me.token, "leftover"); // removed by this process on its next attempt
           }
         },
       };
@@ -179,17 +253,23 @@ export function tryLock(lockFile: string): { release: () => void } | { busy: str
     if (text === undefined) continue; // released meanwhile
     const o = parseOwner(text);
     if (!o) return { busy: `lock is unreadable or in an old format; ${manual}` };
+    if (o.host === me.host && o.pid === process.pid && reg.get(o.token) === "leftover") {
+      fs.rmSync(lockFile, { force: true }); // our own leftover: only we delete our locks
+      reg.delete(o.token);
+      continue;
+    }
     const g = ownerGone(o);
     if (!g.gone) return { busy: `locked (${g.why}); ${manual}` };
     _lockTestHooks.reclaim?.("checked");
-    const done = takeReclaim(lockFile, me, 0);
-    if (!done) return { busy: `lock is being reclaimed (${name}.reclaim); ${manual} and ${name}.reclaim` };
+    const m = takeReclaim(lockFile, me, manual);
+    if ("busy" in m) return m;
     try {
+      _lockTestHooks.reclaim?.("holding");
       const again = parseOwner(readText(lockFile));
       if (again && again.token === o.token) fs.rmSync(lockFile, { force: true });
-      else if (again || readText(lockFile) !== undefined) return { busy: `locked by a new owner; ${manual}` };
+      else if (readText(lockFile) !== undefined) return { busy: `locked by a new owner; ${manual}` };
     } finally {
-      done();
+      m.release();
     }
   }
   return { busy: `lock is contended; ${manual}` };
