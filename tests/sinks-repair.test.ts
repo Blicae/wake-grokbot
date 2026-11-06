@@ -202,6 +202,17 @@ describe("real multi-process contention", () => {
     expect(states.filter((x) => x === "duplicate").length).toBe(5);
     expect(JSON.parse(fs.readFileSync(s.done, "utf8")).report_sha256).toBe(sha(s.report));
   }, 60_000);
+  it("8 processes reclaiming the same dead lock at once: exactly one delivers, no stray lock files", async () => {
+    const s = setup();
+    const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout;
+    fs.writeFileSync(s.lock, JSON.stringify({ host: os.hostname(), pid: Number(dead), started_at: 1, token: "dead" }));
+    const r = reply("done", "reclaimed");
+    const results = await Promise.all(Array.from({ length: 8 }, () => child(s, r, 1).done));
+    const states = results.map((x) => JSON.parse(x.out.trim().split("\n").at(-1)!).state);
+    expect(states.filter((x) => x === "delivered").length).toBe(1);
+    expect(states.filter((x) => x === "duplicate").length).toBe(7);
+    expect(fs.readdirSync(s.root).sort()).toEqual(["r.md", "r.md.DONE", "r.md.wake.json"]);
+  }, 60_000);
   it.skipIf(process.platform === "win32")("a SIGKILLed lock holder is recovered; a live holder is not stolen", async () => {
     const s = setup();
     const r = reply("done", "after-kill");

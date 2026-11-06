@@ -118,7 +118,9 @@ the old needs_input `.DONE` behavior. Fault injection only via test setup (pre-m
    unresolvable with no HTTP status). Any non-2xx answer (3xx never followed, `redirect: "manual"` in `net.ts`;
    4xx; 429; 5xx) or timeout is `unknown`, never auto-resent.
 2. Lock: owner record `{host, pid, started_at, token}`; reclaimed only when provably gone (same host, `kill(pid,0)`
-   = ESRCH, or our own pid with another start time); never by age; reclaim by rename-aside + token check.
+   = ESRCH, or our own pid with another start time); never by age. Revision 4: the rename-aside reclaim could
+   move a live lock created between check and rename (reproduced: a third process then also held the lock); now
+   reclaim happens only under an exclusive `<lock>.reclaim` mutex with a token re-check, and the lock is never renamed.
    Otherwise busy -> `not_sent`/`failed`, retryable, with a manual-recovery hint (documented in engine-interface §4).
 3. Crash windows: intent sidecar (phase `intent`, expected `report_sha256`) before the report; `committed` after;
    duplicate requires reply_id, status, actual report bytes, committed phase and marker all consistent; otherwise

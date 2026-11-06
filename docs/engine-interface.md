@@ -86,7 +86,9 @@ For `reply_to.sink = "hufu-report"` (report layout `wake-report/1`, marker forma
 
 1. take a per-path lock `<report>.lock` (records host, pid, process start time and a random token). A busy lock
    fails the delivery with outcome `not_sent` (retryable). A lock is never taken over because of its age: it is
-   reclaimed only when its owner is provably gone (same host, pid no longer exists). A lock from another host, an
+   reclaimed only when its owner is provably gone (same host, pid no longer exists), and only while holding
+   `<report>.lock.reclaim`, re-checking the owner token first (a live lock is never moved or removed; a leftover
+   `.reclaim` file is not stolen either: delete it manually after checking no process is delivering). A lock from another host, an
    unreadable lock, or a live (or possibly reused) pid stays; **manual recovery**: make sure no wake-grokbot process
    is delivering to that path, delete `<report>.lock`, and let core retry the same delivery;
 2. with a task delivery: write the intent `<report>.wake.json` (`wake-sink-state/1`, `phase: "intent"`: owner
