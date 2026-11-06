@@ -121,6 +121,10 @@ the old needs_input `.DONE` behavior. Fault injection only via test setup (pre-m
    = ESRCH, or our own pid with another start time); never by age. Revision 4: the rename-aside reclaim could
    move a live lock created between check and rename (reproduced: a third process then also held the lock); now
    reclaim happens only under an exclusive `<lock>.reclaim` mutex with a token re-check, and the lock is never renamed.
+   Revision 5: the lock primitive moved to `fsutil.tryLock`/`withLock` (single implementation for the store lock
+   and sinks; `withLock` signature unchanged, `staleMs` ignored); own pid is always alive (no start-time estimate
+   as death proof); release verifies its token under the same reclaim mutex; legacy/unknown lock formats are never
+   deleted. `task` extra keys rejected at runtime (top-level and `task.ref` already were).
    Otherwise busy -> `not_sent`/`failed`, retryable, with a manual-recovery hint (documented in engine-interface §4).
 3. Crash windows: intent sidecar (phase `intent`, expected `report_sha256`) before the report; `committed` after;
    duplicate requires reply_id, status, actual report bytes, committed phase and marker all consistent; otherwise

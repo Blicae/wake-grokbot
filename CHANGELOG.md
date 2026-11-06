@@ -21,6 +21,12 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
   written before the report so a retry repairs its own crash windows. Webhook: only a provably unsent request
   is `not_sent`; any non-2xx answer or timeout is `unknown`. Sink types (`SinkContext`, `SinkDelivery`,
   `SinkResult`, `SinkOutcome`, `SinkState`) are exported from the package entry. Webhooks send `X-Wake-Grokbot-Delivery-Id`.
+- State lock (`state.lock`) and sink locks share one primitive (`fsutil.tryLock`/`withLock`, format `wake-lock/1`:
+  host, pid, token): never broken by age; reclaimed only when the owner is provably gone (same host, pid no longer
+  exists) under a `.reclaim` mutex with a token re-check; this process's own pid always counts as alive. A lock in
+  the old `<token> <pid>` format, from another host or unreadable is never removed automatically: `state lock busy`
+  (exit 3 as before) with a manual-recovery hint (check that no wake-grokbot process runs, then delete the file).
+- `task` objects reject unknown keys at runtime (`unknown field: task.<key>`), like the schema.
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
 - Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`; a global install of another version is refused, never used.
