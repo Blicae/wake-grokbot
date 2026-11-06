@@ -51,7 +51,7 @@ export type WriteWindow = "intent" | "report" | "sidecar" | "marker";
  * Test-only fault injection: not exported from the package entry (src/index.ts), not reachable from the CLI,
  * config or environment. Tests set `fault` to throw (or block) right after a write window.
  */
-export const _testHooks: { fault?: (after: WriteWindow) => void } = {};
+export const _testHooks: { fault?: (after: WriteWindow) => void; lockReclaim?: (phase: "checked") => void } = {};
 
 /** True when the sink can be replayed safely with the same delivery (file and report sinks are idempotent). */
 export function sinkReplaySafe(to: ReplyTo): boolean {
@@ -162,25 +162,25 @@ function tryLock(target: string): { release: () => void } | { busy: string } {
     if (!o || typeof o.pid !== "number" || typeof o.host !== "string" || typeof o.token !== "string") return { busy: `lock is unreadable; ${manual}` };
     const g = ownerGone(o);
     if (!g.gone) return { busy: `locked (${g.why}); ${manual}` };
-    // reclaim atomically: move the dead owner's lock aside, then confirm it was really that one
-    const aside = `${lock}.stale-${me.token}`;
+    _testHooks.lockReclaim?.("checked");
+    // Reclaim under a separate reclaim mutex, never by moving the lock: the lock is only removed by its owner or by
+    // a reclaimer holding `<lock>.reclaim`, so re-checking the token under that mutex proves the file we remove is
+    // still the dead owner's (a fresh live lock can never be moved or removed). A stuck reclaim mutex is never
+    // stolen either: manual recovery.
+    const reclaim = `${lock}.reclaim`;
     try {
-      fs.renameSync(lock, aside);
-    } catch {
-      continue;
-    }
-    const moved = parseMaybe(readMaybe(aside));
-    if (moved?.token === o.token) {
-      fs.rmSync(aside, { force: true });
-      continue;
+      fs.writeFileSync(reclaim, JSON.stringify(me) + "\n", { flag: "wx" });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      return { busy: `lock is being reclaimed (${path.basename(reclaim)}); ${manual} and ${path.basename(reclaim)}` };
     }
     try {
-      fs.linkSync(aside, lock); // someone else's fresh lock: put it back (never overwrites)
-    } catch {
-      /* a new lock exists already */
+      const again = parseMaybe(readMaybe(lock));
+      if (again && again.token === o.token) fs.rmSync(lock, { force: true });
+      else if (again) return { busy: `locked by a new owner; ${manual}` };
+    } finally {
+      if (parseMaybe(readMaybe(reclaim))?.token === me.token) fs.rmSync(reclaim, { force: true });
     }
-    fs.rmSync(aside, { force: true });
-    return { busy: `lock changed while reclaiming; ${manual}` };
   }
   return { busy: `lock is contended; ${manual}` };
 }
