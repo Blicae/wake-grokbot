@@ -8,6 +8,7 @@ import { type Config, configInfo, EXAMPLE_CONFIG, loadConfig } from "./config.js
 import { Engine } from "./core.js";
 import { type Envelope, isExpired, isTerminal, type Status, STATUSES, VERSION } from "./envelope.js";
 import { CliError, EXIT, usage } from "./errors.js";
+import type { Quota } from "./footer.js";
 import { atomicWrite } from "./fsutil.js";
 import { GUIDE_ZH } from "./guide.js";
 import { configPath, ENV, PROG } from "./paths.js";
@@ -39,7 +40,11 @@ Commands:
                               show a receipt (or the outbox); reconcile an unknown wake by hand
   ack <id> [--status working] mark a message as picked up
   reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
-  reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...)
+  reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...);
+                              a top-level "quota": {used, remaining, reset} is read for the report footer
+                              [--quota-used <t>] [--quota-remaining <t>] [--quota-reset <time>]
+                              account weekly quota as the woken Bot sees it (not this task's cost); shown in
+                              the footer of a done/failed/declined report file, with start/finish in 北京时间
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
   redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]
                               send one reply to its sink again by hand (unknown outcomes need the risk flag;
@@ -83,6 +88,9 @@ const OPTIONS = {
   summary: { type: "string" },
   question: { type: "string" },
   next: { type: "string" },
+  "quota-used": { type: "string" },
+  "quota-remaining": { type: "string" },
+  "quota-reset": { type: "string" },
   "mark-wake": { type: "string" },
   "no-wake": { type: "boolean" },
   id: { type: "string" },
@@ -235,11 +243,16 @@ async function run(argv: string[], io: Io): Promise<number> {
     case "reply": {
       const id = pos[0];
       if (!id) throw usage("reply <id> --status <status>");
-      let input: Partial<Envelope> & { status: Status };
+      let input: Partial<Envelope> & { status: Status; quota?: Quota };
       if (!o.status && (o.json || pos[1])) {
-        const j = parseJson(await readInput(io, pos[1]), "reply") as Partial<Envelope>;
+        const j = parseJson(await readInput(io, pos[1]), "reply") as Partial<Envelope> & { quota?: unknown };
         if (!j || typeof j !== "object") throw usage("reply --json needs an object");
-        input = { ...j, status: status(j.status) };
+        if (j.quota !== undefined && (!j.quota || typeof j.quota !== "object" || Array.isArray(j.quota))) throw usage("reply --json: quota must be an object {used, remaining, reset}");
+        const jq = j.quota as Record<string, unknown> | undefined;
+        if (jq) for (const k of Object.keys(jq)) if (!["used", "remaining", "reset"].includes(k)) throw usage(`reply --json: unknown field quota.${k}`);
+        const { quota: _q, ...je } = j;
+        void _q;
+        input = { ...je, status: status(j.status), ...(jq ? { quota: jq as Quota } : {}) };
       } else {
         input = {
           status: status(o.status),
@@ -249,6 +262,13 @@ async function run(argv: string[], io: Io): Promise<number> {
           ...(o["body-file"] ? { body: await readInput(io, o["body-file"]) } : {}),
         };
       }
+      const fq: Quota = {
+        ...(input.quota ?? {}),
+        ...(o["quota-used"] !== undefined ? { used: o["quota-used"] } : {}),
+        ...(o["quota-remaining"] !== undefined ? { remaining: o["quota-remaining"] } : {}),
+        ...(o["quota-reset"] !== undefined ? { reset: o["quota-reset"] } : {}),
+      };
+      if (Object.keys(fq).length) input.quota = fq;
       const r = await eng.reply(id, input);
       return print(r, { reply_id: r.replyId });
     }

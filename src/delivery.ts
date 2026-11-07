@@ -45,6 +45,8 @@ export interface ReplyIntent {
   target?: string;
   reply: Envelope;
   reply_to?: ReplyTo;
+  /** terminal report footer (quota + execution time), fixed when the intent is written so every redelivery writes the same bytes */
+  report_footer?: string;
   created_at: string;
 }
 

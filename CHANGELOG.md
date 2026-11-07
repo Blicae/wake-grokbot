@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Terminal report footer: a `done` / `failed` / `declined` report file (`hufu-report` sink) now ends with a fixed
+  block: the Grok Bot account's weekly quota (passed by the woken Bot with `reply --quota-used`,
+  `--quota-remaining`, `--quota-reset`, or `"quota"` in `reply --json`; `未提供` when missing), and the execution
+  time computed from the ack/working receipt to the terminal reply, in 北京时间. `report_sha256` covers it.
+  Non-terminal reports, the envelope and webhook/command/file sinks are unchanged. See docs/engine-interface.md.
+
 ## 0.1.0 (Unreleased)
 
 First release of the TypeScript/Node rewrite. It replaces the earlier Python prototype, which is not compatible.

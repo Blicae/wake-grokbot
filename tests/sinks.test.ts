@@ -95,7 +95,8 @@ describe("hufu-report sink (Hufu-style report file)", () => {
     fs.writeFileSync(body, "Details here.");
     const { e, r } = await sendAndReply(s, { sink: "hufu-report", report_path: report }, ["--status", "done", "--summary", "finished it", "--body-file", body]);
     expect(r.code).toBe(0);
-    expect(fs.readFileSync(report, "utf8")).toBe("就绪：finished it\n\nDetails here.\n");
+    // terminal report: header + body unchanged, then the fixed footer (tests/report-footer.test.ts)
+    expect(fs.readFileSync(report, "utf8").startsWith("就绪：finished it\n\nDetails here.\n\n---\n账号用量")).toBe(true);
     const done = JSON.parse(fs.readFileSync(report + ".DONE", "utf8"));
     expect(done.status).toBe("done");
     expect(fs.statSync(report + ".DONE").mtimeMs).toBeGreaterThanOrEqual(fs.statSync(report).mtimeMs);
