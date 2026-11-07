@@ -57,7 +57,7 @@ describe.skipIf(!HAS_SH)(`watch.sh runs exactly the pinned version (skipped when
   it("global with another version: exit 2, runs nothing", () => {
     const r = run("0.0.9");
     expect(r.code).toBe(2);
-    expect(r.err).toMatch(/'0\.0\.9'.*0\.1\.0/);
+    expect(r.err).toMatch(new RegExp(`'0\\.0\\.9'.*${PIN.replace(/[.]/g, "\\.")}`));
     expect(r.log).toBe("");
   });
   it("no global: npx with the pinned version and the explicit config", () => {
