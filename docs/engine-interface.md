@@ -23,7 +23,13 @@ engine ◀── <report>.md + <report>.md.DONE ◀────────┘ (
 ```
 
 `report_roots` lists the only folders reports may be written to. The wake URL and key come from environment
-variables (see `wake-grokbot doctor`), never from the config or the envelope.
+variables (see `wake-grokbot doctor`), never from the config or the envelope. On Windows, use drive-letter
+absolute paths (in JSON, backslashes are escaped), for example `"report_roots": ["D:\\Code\\8917\\open-source\\example-reports"]`;
+this and every other path in this page is an illustration, not a production location. Relative `report_roots`
+and `sign.key_file` values are resolved against the folder of the config file.
+
+Who fills in the real config (source name, `to` mapping, target, `report_roots`, signing) and how a real receiver
+is registered: see [engine-consumer.md](engine-consumer.md#7-registration-of-a-real-receiver).
 
 ## 2. Waking a seat: hand in a task
 
@@ -53,14 +59,27 @@ The public example (`fixtures/task-hufu-report.json`):
 
 Rules the engine must follow:
 
-- `id` is a fresh UUID per task and is the idempotency key. Re-sending the same envelope is safe (exit 0, no second wake);
-  re-using an id with different content exits 7.
-- `from` must equal the source name given to `--from`. With `require_sig`, add `sig` (`hmac-sha256` over
-  `"wake-envelope/1\n"` + canonical JSON); missing or wrong signatures exit 4.
+- `id` is a fresh UUID per task and is the idempotency key. Re-sending the same envelope never writes a second
+  task. Its exit code reports the wake state already recorded for that id: `0` if the earlier wake started (or the
+  item is still queued/coalesced, or there is no wake target), `5` if it was `not_started`, `dead`, `disabled` or
+  `capped`, `6` if it was `unknown`. One exception wakes again: if the id was accepted, its receipt still says
+  `queued`, but the queue entry was lost (crash before the outbox write), the resend puts it back in the queue and
+  wakes once. Re-using an id with different content exits 7. (Code: `src/core.ts` `accept`, `codeFor`, `requeueIfLost`.)
+- `from` must equal the source name given to `--from`. Signatures are `sig = "hmac-sha256:" + hex(HMAC-SHA256(key,
+  "wake-envelope/1\n" + canonical JSON))`; canonical JSON sorts keys recursively and drops `sig` and undefined
+  values. The key is a shared secret read from `sign.key_file` (trimmed, at least 16 bytes); there is no public
+  key. A signature is required when `sources.<name>.require_sig` or `sign.require` is true. Exit 4: signature
+  required but missing, malformed or wrong, or the envelope carries `sig` while no `sign.key_file` is configured.
+  An unsigned envelope is accepted when neither switch is set. The public fixture carries no `sig`: whether a
+  source must sign is decided when it is registered. Details: [engine-consumer.md](engine-consumer.md#6-signing).
 - No URLs and no secrets anywhere in the envelope (exit 1). Refer to configured names instead.
-- `report_path` is absolute, has no `..`, and lies inside a `report_roots` folder.
+- `report_path` is absolute, has no `..`, lies inside a `report_roots` folder (not the root itself), and is unique
+  per task. The fixture's `/srv/reports/build-summary.md` is a Unix example; on Windows use a drive-letter path such as
+  `D:\Code\8917\open-source\example-reports\<task-uuid>.md` (JSON: `"D:\\Code\\8917\\open-source\\example-reports\\<task-uuid>.md"`).
+  A path outside the roots is refused when the reply is delivered (`reply` exits 5, nothing written), not at `ingest`.
 - Optional `expires_at` (RFC 3339 date-time, as `format: date-time` in the schema). `ingest` (and `send`) check the id first: an id it has already accepted follows the
-  idempotency rules (same content → 0, different → 7) with no expiry check, so re-sending after expiry is safe.
+  idempotency rules (same content → 0/5/6 from the recorded wake state, different → 7) with no expiry check, so
+  re-sending after expiry is safe.
   A new id that is already past `expires_at` is refused (exit 1, the same class as an invalid envelope; nothing is
   written). If it expires after it was accepted it is not woken (`wake: not_started`, `expired at …`, status
   unchanged), and `status` and `watch` flag the task
@@ -70,7 +89,9 @@ What happens: the envelope lands in `msg/to-worker/unread/<id>.json`, a receipt 
 configured target is woken with a short message (ids, type, a one-line summary, the inbox path; never the body).
 
 Exit codes the engine should act on: `0` accepted (and woken, or no wake target), `5` stored but not woken
-(`watch` retries), `6` wake outcome unknown — **do not resend**, poll `status <id> --json`.
+(`watch` retries), `6` wake outcome unknown — **do not resend**, poll `status <id> --json`. Also: `1` refused by a
+rule (invalid or expired envelope), `2` usage or config error, `3` internal error or state lock busy, `4` signature,
+`7` id re-used with different content. Full table: [engine-consumer.md](engine-consumer.md#5-exit-codes).
 
 ## 3. What the seat does
 
@@ -158,6 +179,12 @@ points at a half-written report. Final states are `done`, `failed`, `declined`; 
 in the same `thread`. The reply envelope also lands in `msg/to-dispatcher/unread/` and the task's receipt records
 `sink_result`. If the sink refuses (for example a path outside `report_roots`), `reply` exits 5 and no report or
 `.DONE` is written.
+
+Consuming is the engine's own job. There is **no** consume-ack command: the engine watches the report and
+`<report>.DONE`, checks `format`, `task_id`, `status` and `report_sha256`, and records what it consumed as
+`(task_id, revision, report_sha256, status)` in its own state. HTTP 200, `receipt.done` or a `.DONE` file on its own
+is never completion. The `<report>.wake.json` sidecar (`wake-sink-state/1`) is optional to read. The full consumer
+rules: [engine-consumer.md](engine-consumer.md).
 
 This loop is covered by `tests/report-loop.test.ts`, which runs it in a temp folder with the public fixture.
 See also [integrations.md](integrations.md) and [threat-model.md](threat-model.md).
