@@ -49,6 +49,7 @@ First release of the TypeScript/Node rewrite. It replaces the earlier Python pro
 - Envelope times (`sent_at`, `quoted_at`, `expires_at`) are validated as RFC 3339 at runtime, like the schema.
 - The example config no longer ships a `my-hook` webhook (a fresh `init` + `doctor` no longer warns about it).
 - Install docs and scheduled-watch examples pin `wake-grokbot@0.1.0` and pass an explicit `--config`; a global install of another version is refused, never used.
+- Tests: `install-watch-task.ps1` version-pin checks compare the config path after resolving symlinks, so macOS `/var` and `/private/var` are the same file (Windows short and long temp paths still match).
 - Agent skill at `skills/wake-grokbot/SKILL.md`.
 - `release`, `prune`, `doctor --dry-run`, JSON log lines, target `description`/`capabilities`, `send --id/--thread`.
 - Config discovery order (`--config`, `$WAKE_GROKBOT_CONFIG`, `./wake-grokbot.json`, user folder); errors name the config and the paths searched.
