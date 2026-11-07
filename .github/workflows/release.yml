@@ -1,6 +1,5 @@
-# Publishes to npm with provenance when a version tag (v*) is pushed.
-# Needs an npm automation token in the repository secret NPM_TOKEN (or npm trusted publishing).
-# Nothing here runs until a maintainer pushes a tag.
+# Publishes to npm with provenance using GitHub OIDC trusted publishing.
+# Nothing here runs until a maintainer pushes a version tag (v*).
 name: release
 
 on:
@@ -21,9 +20,25 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: install and verify npm CLI
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const version = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+          const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+          if (!match) throw new Error(`Unexpected npm version: ${version}`);
+          const actual = match.slice(1).map(Number);
+          const minimum = [11, 5, 1];
+          const difference = actual.findIndex((value, index) => value !== minimum[index]);
+          if (difference !== -1 && actual[difference] < minimum[difference]) {
+            throw new Error(`npm >= 11.5.1 required; got ${version}`);
+          }
+          NODE
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -31,5 +46,3 @@ jobs:
       - name: tag matches package.json
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
