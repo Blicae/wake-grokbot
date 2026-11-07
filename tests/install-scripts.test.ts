@@ -22,6 +22,23 @@ function findPwsh(): string | undefined {
 const PWSH = findPwsh();
 const PS_REASON = "install-watch-task.ps1 tests need pwsh or powershell on PATH";
 
+/**
+ * The script records `(Resolve-Path).Path`. On macOS that keeps `/var/...` while
+ * `fs.realpathSync` follows `/var` → `/private/var`. Windows may spell the same
+ * temp file as an 8.3 path or its long path. Compare the file, not the spelling.
+ */
+function expectConfigAction(log: string, exeLeaf: string, cfg: string, beforeConfig = ""): void {
+  const needle = `action|${exeLeaf}|${beforeConfig}--config "`;
+  const at = log.indexOf(needle);
+  expect(at, log).toBeGreaterThanOrEqual(0);
+  const rest = log.slice(at + needle.length);
+  const end = rest.indexOf(`" watch --once`);
+  expect(end, log).toBeGreaterThan(0);
+  const logged = rest.slice(0, end);
+  expect(fs.existsSync(logged), log).toBe(true);
+  expect(fs.realpathSync(logged)).toBe(fs.realpathSync(cfg));
+}
+
 describe.skipIf(!HAS_SH)(`watch.sh runs exactly the pinned version (skipped when: ${SH_REASON})`, () => {
   function run(globalVersion: string | null) {
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "wg-bin-"));
@@ -68,12 +85,12 @@ describe.skipIf(!PWSH)(`install-watch-task.ps1 version pin (skipped when: ${PS_R
       function Register-ScheduledTask { Add-Content -LiteralPath '${log}' 'registered' }
       & '${path.join(ROOT, "examples", "install-watch-task.ps1")}' -Config '${cfg}' -TaskName 'wg-test-not-real'`;
     const r = spawnSync(PWSH!, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8" });
-    return { code: r.status, out: r.stdout + r.stderr, log: fs.existsSync(log) ? fs.readFileSync(log, "utf8").replace(/\r/g, "") : "", cfg: fs.realpathSync(cfg) };
+    return { code: r.status, out: r.stdout + r.stderr, log: fs.existsSync(log) ? fs.readFileSync(log, "utf8").replace(/\r/g, "") : "", cfg };
   }
   it("global with the pinned version: registers it with the explicit config", () => {
     const r = run(PIN);
     expect(r.code, r.out).toBe(0);
-    expect(r.log).toContain(`action|wake-grokbot.ps1|--config "${r.cfg}" watch --once`);
+    expectConfigAction(r.log, "wake-grokbot.ps1", r.cfg);
     expect(r.log).toContain("registered");
   });
   it("global with another version: fails, registers nothing", () => {
@@ -85,8 +102,28 @@ describe.skipIf(!PWSH)(`install-watch-task.ps1 version pin (skipped when: ${PS_R
   it("no global: npx with the pinned version and the explicit config", () => {
     const r = run(null);
     expect(r.code, r.out).toBe(0);
-    expect(r.log).toContain(`action|npx.ps1|--yes wake-grokbot@${PIN} --config "${r.cfg}" watch --once`);
+    expectConfigAction(r.log, "npx.ps1", r.cfg, `--yes wake-grokbot@${PIN} `);
   });
+});
+
+it.skipIf(process.platform === "win32")("config path check treats a symlinked temp directory as the same file", () => {
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), "wg-ps-real-"));
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "wg-ps-link-"));
+  const link = path.join(parent, "alias");
+  fs.symlinkSync(real, link, "dir");
+  try {
+    const cfg = path.join(link, "w.json");
+    fs.writeFileSync(cfg, "{}");
+    // macOS CI: Resolve-Path keeps the /var spelling; realpath follows it to /private/var.
+    const unresolved = `action|wake-grokbot.ps1|--config "${cfg}" watch --once\n`;
+    const resolved = `action|npx.ps1|--yes wake-grokbot@${PIN} --config "${fs.realpathSync(cfg)}" watch --once\n`;
+    expect(fs.realpathSync(cfg)).not.toBe(cfg);
+    expectConfigAction(unresolved, "wake-grokbot.ps1", cfg);
+    expectConfigAction(resolved, "npx.ps1", cfg, `--yes wake-grokbot@${PIN} `);
+  } finally {
+    fs.rmSync(real, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
 });
 
 it("install-watch-task.ps1 refuses a mismatching global (static check, runs everywhere)", () => {
