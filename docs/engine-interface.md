@@ -125,6 +125,34 @@ Report file layout:
 
 Status words: `working` 进展, `needs_input` 等待, `done` 就绪, `blocked` 受阻, `failed` 失败, `declined` 无需处理.
 
+**Terminal report footer (receipt information).** A terminal report (`done`, `failed`, `declined`) ends with a
+fixed footer after the body and one blank line; `working` / `needs_input` / `blocked` reports have none. The
+header (status line, optional decision line, blank line) is unchanged, so line 1 parsing still works. The
+footer is part of the report bytes: `report_sha256` in `.DONE` covers it.
+
+```
+就绪：build passed
+                              ← blank line
+<reply body>
+                              ← blank line
+---
+账号用量（周额度，非本单消耗）：已用 62%，剩余 38%，重置：北京时间 2026-11-10 08:00:00
+任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 1小时23分45秒
+```
+
+- 账号用量: the Grok Bot account's weekly quota as the woken Bot saw it, passed with
+  `reply --quota-used/--quota-remaining/--quota-reset` (or `"quota": {used, remaining, reset}` in `reply --json`).
+  Missing values read `未提供`; the reply never fails for that. A reset time in zoned ISO-8601 or epoch
+  seconds/milliseconds is shown in 北京时间; anything else is shown as given with `（原样，未换算）`. Values
+  containing a URL or something secret-like are refused (exit 1, nothing written).
+- 任务执行: computed by the CLI. Start = the earliest `ack` or non-terminal (`working` / `needs_input`) reply in
+  the task receipt, never the ingest/queue time; finish = the terminal reply's `sent_at`. Without an ack the
+  line reads `任务执行：开始时间：未记录领单（ack）时间，完成 北京时间 …，耗时 无法计算`. Duration is Chinese with
+  zero units left out (`1小时5秒`, `23分`, `0秒`). All times are Asia/Shanghai, `YYYY-MM-DD HH:MM:SS`.
+- The footer is fixed when the reply is first written, so a resend or `redeliver` writes the same bytes.
+- It is not part of the envelope: no new envelope field, no change to the reply sent to `webhook`, `command` or
+  `file` sinks, no new consume-ack. Engines that ignore it need no change.
+
 The engine waits for `<report>.DONE`, checks `format` and `report_sha256`, then reads the report. A `.DONE` never
 points at a half-written report. Final states are `done`, `failed`, `declined`; on `needs_input` or `blocked` the engine may answer with a new envelope
 in the same `thread`. The reply envelope also lands in `msg/to-dispatcher/unread/` and the task's receipt records

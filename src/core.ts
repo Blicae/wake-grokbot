@@ -9,6 +9,7 @@ import { contentHash, type Envelope, isExpired, isTerminal, type Status, sign, v
 import { atomicCreate, readJson, renameRetry } from "./fsutil.js";
 import { ENV } from "./paths.js";
 import { mask } from "./secrets.js";
+import { type Quota, quotaProblems, renderFooter, startedAt } from "./footer.js";
 import { type DeliveryRecord, OUTCOME_MISSING_DETAIL, outcomeMissing, outcomeOf, replaySafe, type ReplyIntent } from "./delivery.js";
 import { deliver } from "./sinks.js";
 import { type Receipt, Store, type WakeState } from "./store.js";
@@ -391,9 +392,13 @@ export class Engine {
   }
 
   /** Answer a task: write the reply envelope, update the task's receipt, deliver to its sink, wake the other side. */
-  async reply(id: string, input: Partial<Envelope> & { status: Status }): Promise<Result & { replyId: string }> {
+  async reply(id: string, input: Partial<Envelope> & { status: Status; quota?: Quota }): Promise<Result & { replyId: string }> {
     const orig = this.store.readEnvelope(id);
     if (!orig) throw rule(`no such id: ${id}`);
+    const { quota, ...rest } = input;
+    input = rest as typeof input;
+    const qp = quotaProblems(quota);
+    if (qp.length) throw rule("invalid quota: " + qp.join("; "));
     const reply: Envelope = {
       v: VERSION,
       id: input.id ?? randomUUID(),
@@ -447,6 +452,9 @@ export class Engine {
         ...(target ? { target } : {}),
         reply,
         ...(orig.reply_to ? { reply_to: orig.reply_to } : {}),
+        ...(orig.reply_to?.sink === "hufu-report" && isTerminal(reply.status)
+          ? { report_footer: renderFooter({ quota, startedAt: startedAt(task ?? undefined), completedAt: Date.parse(reply.sent_at) }) }
+          : {}),
         created_at: new Date(this.now()).toISOString(),
       };
       this.store.writeIntent(i);
@@ -551,6 +559,7 @@ export class Engine {
       env: this.env,
       timeoutMs: this.cfg.wake.timeout_seconds * 1000,
       delivery: { taskId: i.taskId, replyHash: i.hash, revision: i.revision },
+      ...(i.report_footer ? { reportFooter: i.report_footer } : {}),
     };
     const hooks = coreTestHooks(this);
     hooks?.onDeliver?.(ctx);

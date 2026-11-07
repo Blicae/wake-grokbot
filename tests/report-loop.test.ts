@@ -40,7 +40,8 @@ describe("report file + .DONE loop (public fixture task-hufu-report.json)", () =
 
     const text = fs.readFileSync(report, "utf8");
     expect(text.split("\n")[0]).toBe("就绪：build passed");
-    expect(text).toBe("就绪：build passed\n\nBuild #42 passed.\nNo warnings.\n");
+    expect(text.startsWith("就绪：build passed\n\nBuild #42 passed.\nNo warnings.\n\n---\n")).toBe(true);
+    expect(text).toMatch(/\n任务执行：开始 北京时间 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}，完成 北京时间 [^\n]+，耗时 [^\n]+\n$/);
     const done = JSON.parse(fs.readFileSync(report + ".DONE", "utf8"));
     expect(done).toMatchObject({ id: rec.reply_id, status: "done" });
     expect(Number.isNaN(Date.parse(done.at))).toBe(false);

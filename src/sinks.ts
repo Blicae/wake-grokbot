@@ -36,6 +36,8 @@ export interface SinkContext {
   timeoutMs: number;
   /** absent = legacy call: no task association, no ordering or replay guarantees */
   delivery?: SinkDelivery;
+  /** report sinks only: fixed footer appended to a terminal report (never sent to webhooks or commands) */
+  reportFooter?: string;
 }
 
 export const STATE_FORMAT = "wake-sink-state/1";
@@ -62,13 +64,17 @@ export function webhookSignature(secret: string, timestamp: string, body: string
   return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 }
 
-/** First line, optional decision line, blank line, body. Status words follow the Hufu-style report convention. */
-export function renderReport(reply: Envelope): string {
+/**
+ * First line, optional decision line, blank line, body. Status words follow the Hufu-style report convention.
+ * A terminal report may end with a fixed footer (blank line, then the footer block); non-terminal reports never do.
+ */
+export function renderReport(reply: Envelope, footer?: string): string {
   const word = REPORT_WORDS[reply.status ?? "working"];
   const one = (s: string) => s.replace(/\s+/g, " ").trim();
   const lines = [`${word}：${one(reply.summary ?? reply.title ?? "")}`];
   if (reply.status === "needs_input" && reply.question) lines.push(`待人工决定：${one(reply.question)}`);
   lines.push("", (reply.body ?? "").replace(/\r\n/g, "\n").trimEnd(), "");
+  if (footer && isTerminal(reply.status)) lines.push(footer, "");
   return lines.join("\n");
 }
 
@@ -235,5 +241,5 @@ function hufuReport(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult 
   if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent("hufu-report sink: report_path must be absolute");
   if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent("hufu-report sink: report_path must not contain ..");
   if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent("hufu-report sink: report_path is outside the allowed report roots");
-  return writeTarget(reply, { file: target, content: renderReport(reply), marker: true, label: `hufu-report ${path.basename(target)}` }, ctx);
+  return writeTarget(reply, { file: target, content: renderReport(reply, ctx.reportFooter), marker: true, label: `hufu-report ${path.basename(target)}` }, ctx);
 }
