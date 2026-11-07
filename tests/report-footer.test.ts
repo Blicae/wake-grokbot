@@ -125,6 +125,25 @@ describe("terminal report footer (hufu-report sink)", () => {
     );
   });
 
+  it("M1: no ack, blocked then done: the acked_at blocked filled in is not a start", async () => {
+    const { s, e, report } = setup();
+    await ingestAck(s, e, false);
+    expect((await reply(s, e.id, { status: "blocked", sent_at: "2026-11-07T03:00:00Z" })).code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(receiptFile(s, e.id), "utf8")).acked_at).toBe("2026-11-07T03:00:00Z");
+    expect((await reply(s, e.id, { status: "done" })).code).toBe(0);
+    const f = footerOf(fs.readFileSync(report, "utf8"));
+    expect(f).toContain("任务执行：开始时间：未记录领单（ack）时间，完成 北京时间 2026-11-07 11:23:45，耗时 无法计算\n");
+    expect(f).not.toContain("11:00:00");
+  });
+
+  it("needs_input reply (no ack) still counts as the start", async () => {
+    const { s, e, report } = setup();
+    await ingestAck(s, e, false);
+    expect((await reply(s, e.id, { status: "needs_input", question: "q?", sent_at: "2026-11-07T03:00:00Z" })).code).toBe(0);
+    expect((await reply(s, e.id, { status: "done" })).code).toBe(0);
+    expect(footerOf(fs.readFileSync(report, "utf8"))).toContain("任务执行：开始 北京时间 2026-11-07 11:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 23分45秒\n");
+  });
+
   it("CLI flags --quota-used / --quota-remaining / --quota-reset (epoch reset converted)", async () => {
     const { s, e, report } = setup();
     await ingestAck(s, e);

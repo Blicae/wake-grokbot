@@ -71,13 +71,14 @@ export function duration(ms: number): string {
 
 /**
  * Start of execution: the earliest ack (`acked_at`) or non-terminal (working / needs_input) reply, never the
- * ingest/queue time. `acked_at` that a terminal reply filled in (no ack before it) is not an ack.
+ * ingest/queue time. An `acked_at` equal to any reply's time was filled in by that reply (no ack before it) and is
+ * not an ack; working / needs_input replies are collected from the reply list on their own.
  */
 export function startedAt(r: { acked_at?: string; replies: ReplyRecord[] } | undefined): number | undefined {
   if (!r) return undefined;
-  const terminalAt = new Set(r.replies.filter((x) => ["done", "failed", "declined"].includes(x.status)).map((x) => x.at));
+  const replyAt = new Set(r.replies.map((x) => x.at));
   const c: number[] = [];
-  if (r.acked_at && !terminalAt.has(r.acked_at)) c.push(Date.parse(r.acked_at));
+  if (r.acked_at && !replyAt.has(r.acked_at)) c.push(Date.parse(r.acked_at));
   for (const x of r.replies) if (x.status === "working" || x.status === "needs_input") c.push(Date.parse(x.at));
   const ok = c.filter((n) => !Number.isNaN(n));
   return ok.length ? Math.min(...ok) : undefined;
