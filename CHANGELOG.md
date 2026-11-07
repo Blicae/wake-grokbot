@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.1
+
 - Terminal report footer: a `done` / `failed` / `declined` report file (`hufu-report` sink) now ends with a fixed
   block: the Grok Bot account's weekly quota (passed by the woken Bot with `reply --quota-used`,
   `--quota-remaining`, `--quota-reset`, or `"quota"` in `reply --json`; `未提供` when missing), and the execution

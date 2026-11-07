@@ -13,25 +13,25 @@ through a local inbox, and **wakes** the other side (for example a Grok Bot rout
 ## Quick start
 
 ```sh
-npx --yes wake-grokbot@0.1.0 init        # example config + inbox folders
+npx --yes wake-grokbot@0.1.1 init        # example config + inbox folders
 # put the routine's webhook URL and key in environment variables:
 #   WAKE_GROKBOT_URL, WAKE_GROKBOT_KEY   (never in the config, never on the command line)
-npx --yes wake-grokbot@0.1.0 doctor      # checks everything, prints no secrets
+npx --yes wake-grokbot@0.1.1 doctor      # checks everything, prints no secrets
 ```
 
 Send a task (dispatcher):
 
 ```sh
-npx --yes wake-grokbot@0.1.0 send --to worker --title "Tidy the README" --objective "Rewrite the install section"
+npx --yes wake-grokbot@0.1.1 send --to worker --title "Tidy the README" --objective "Rewrite the install section"
 # or a full envelope:
-npx --yes wake-grokbot@0.1.0 send --json < task.json
+npx --yes wake-grokbot@0.1.1 send --json < task.json
 ```
 
 Answer it (worker):
 
 ```sh
-npx --yes wake-grokbot@0.1.0 ack <id>
-npx --yes wake-grokbot@0.1.0 reply <id> --status done --summary "Rewritten and checked" --body-file result.md
+npx --yes wake-grokbot@0.1.1 ack <id>
+npx --yes wake-grokbot@0.1.1 reply <id> --status done --summary "Rewritten and checked" --body-file result.md
 ```
 
 ## Commands

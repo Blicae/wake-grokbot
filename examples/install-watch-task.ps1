@@ -1,9 +1,9 @@
 ﻿# Registers a Windows scheduled task that runs `wake-grokbot watch --once` every 5 minutes.
 # The wake URL and key must be in the user's environment variables (never in this script).
-# Usage:  powershell -ExecutionPolicy Bypass -File install-watch-task.ps1 -Config <config file> [-Version 0.1.0] [-Minutes 5] [-Remove]
+# Usage:  powershell -ExecutionPolicy Bypass -File install-watch-task.ps1 -Config <config file> [-Version 0.1.1] [-Minutes 5] [-Remove]
 param(
   [string]$Config = "",
-  [string]$Version = "0.1.0",
+  [string]$Version = "0.1.1",
   [int]$Minutes = 5,
   [string]$TaskName = "wake-grokbot-watch",
   [switch]$Remove

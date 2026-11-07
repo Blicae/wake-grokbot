@@ -1,6 +1,6 @@
 {
   "name": "wake-grokbot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dispatch tasks to agents through a file inbox with idempotent receipts, and wake a Grok Bot when there is work.",
   "type": "module",
   "license": "MIT",

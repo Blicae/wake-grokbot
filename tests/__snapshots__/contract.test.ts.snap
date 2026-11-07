@@ -4,7 +4,7 @@ exports[`CLI contract > --version 1`] = `
 {
   "code": 0,
   "err": "",
-  "out": "0.1.0
+  "out": "0.1.1
 ",
 }
 `;
@@ -183,7 +183,7 @@ exports[`CLI contract > no command → help on stdout, exit 2 1`] = `
 {
   "code": 2,
   "err": "",
-  "out": "wake-grokbot 0.1.0
+  "out": "wake-grokbot 0.1.1
 （中文说明：wake-grokbot guide）
 Local inbox + wake-up messages between a dispatcher and a worker agent.
 

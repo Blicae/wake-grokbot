@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(import.meta.dirname, "..");
-const PIN = "0.1.0";
+const PIN = "0.1.1";
 
 // POSIX shell tests need /bin/sh; Windows has none (watch.sh is the Linux/macOS example).
 const HAS_SH = process.platform !== "win32" && fs.existsSync("/bin/sh");
