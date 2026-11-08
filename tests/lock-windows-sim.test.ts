@@ -1,4 +1,4 @@
-/** RD-001-G-H: Windows filesystem behaviours simulated on any OS (test-only fs injection in fsutil). */
+/** Windows filesystem behaviours simulated on any OS (test-only fs injection in fsutil). */
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";

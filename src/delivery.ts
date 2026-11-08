@@ -1,5 +1,5 @@
 /**
- * Delivery contract between the core and the reply sinks (RD-001-G interface freeze v1).
+ * Delivery contract between the core and the reply sinks (interface freeze v1).
  * Shared public types live here (owned by the core); sink-only types stay in sinks.ts.
  * Core always calls the real sinks exports (`sinkReplaySafe`, `outcome`/`state` on SinkResult).
  * A result with no `outcome` is a contract violation: treated as `unknown`, never inferred as not_sent.

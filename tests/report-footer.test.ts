@@ -1,5 +1,5 @@
 /**
- * RD-004-A: the fixed footer at the end of a terminal report file (account weekly quota + execution time in 北京时间).
+ * the fixed footer at the end of a terminal report file (account weekly quota + execution time in 北京时间).
  * Start = ack / working (never ingest), finish = the terminal reply's sent_at; quota comes from the woken Bot.
  */
 import { createHash } from "node:crypto";
