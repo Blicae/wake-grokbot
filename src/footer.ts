@@ -101,5 +101,5 @@ export function renderFooter(o: { quota?: Quota; startedAt?: number; completedAt
     o.startedAt === undefined
       ? `任务执行：${NO_ACK_START}，${done}，耗时 ${NO_DURATION}`
       : `任务执行：开始 北京时间 ${beijing(o.startedAt)}，${done}，耗时 ${o.completedAt >= o.startedAt ? duration(o.completedAt - o.startedAt) : NO_DURATION}`;
-  return [FOOTER_RULE, `账号用量（周额度，非本单消耗）：已用 ${val(q.used)}，剩余 ${val(q.remaining)}，重置：${reset}`, run].join("\n");
+  return [FOOTER_RULE, `Grok Bot额度（周额度，非本单消耗）：已用 ${val(q.used)}，剩余 ${val(q.remaining)}，重置：${reset}`, run].join("\n");
 }

@@ -69,7 +69,7 @@ describe("report footer helpers", () => {
   it("renderFooter: three blocks, 北京时间 labels, unparseable reset shown as given", () => {
     const f = renderFooter({ quota: { used: "62%", remaining: "38%", reset: "下周一" }, startedAt: Date.parse(ACK), completedAt: Date.parse(DONE) });
     expect(f).toBe(
-      "---\n账号用量（周额度，非本单消耗）：已用 62%，剩余 38%，重置：下周一（原样，未换算）\n" +
+      "---\nGrok Bot额度（周额度，非本单消耗）：已用 62%，剩余 38%，重置：下周一（原样，未换算）\n" +
         "任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 1小时23分45秒",
     );
   });
@@ -86,7 +86,7 @@ describe("terminal report footer (hufu-report sink)", () => {
       const word = { done: "就绪", failed: "失败", declined: "无需处理" }[st];
       expect(text).toBe(
         `${word}：s\n\n正文第一行\n正文第二行\n\n---\n` +
-          "账号用量（周额度，非本单消耗）：已用 1,234 次，剩余 766 次，重置：北京时间 2026-11-10 08:00:00\n" +
+          "Grok Bot额度（周额度，非本单消耗）：已用 1,234 次，剩余 766 次，重置：北京时间 2026-11-10 08:00:00\n" +
           "任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 1小时23分45秒\n",
       );
       expect(text).not.toContain("09:00:00"); // the ingest/queue time is never the start
@@ -103,7 +103,7 @@ describe("terminal report footer (hufu-report sink)", () => {
     expect((await reply(s, e.id, { status: "needs_input", question: "选哪个？", sent_at: "2026-11-07T02:30:00Z" })).code).toBe(0);
     const t = fs.readFileSync(report, "utf8");
     expect(t).toBe("等待：s\n待人工决定：选哪个？\n\n正文第一行\n正文第二行\n");
-    expect(t).not.toContain("账号用量");
+    expect(t).not.toContain("Grok Bot额度");
   });
 
   it("a working reply counts as the start when there was no ack", async () => {
@@ -120,7 +120,7 @@ describe("terminal report footer (hufu-report sink)", () => {
     const r = await reply(s, e.id, { status: "done" });
     expect(r.code).toBe(0);
     expect(footerOf(fs.readFileSync(report, "utf8"))).toBe(
-      "---\n账号用量（周额度，非本单消耗）：已用 未提供，剩余 未提供，重置：未提供\n" +
+      "---\nGrok Bot额度（周额度，非本单消耗）：已用 未提供，剩余 未提供，重置：未提供\n" +
         "任务执行：开始时间：未记录领单（ack）时间，完成 北京时间 2026-11-07 11:23:45，耗时 无法计算\n",
     );
   });
@@ -153,7 +153,7 @@ describe("terminal report footer (hufu-report sink)", () => {
     expect(r.code).toBe(0);
     const t = fs.readFileSync(report, "utf8");
     expect(t.startsWith("就绪：ok\n\nok\n\n---\n")).toBe(true);
-    expect(t).toContain(`账号用量（周额度，非本单消耗）：已用 40%，剩余 60%，重置：北京时间 ${beijing(1794268800_000)}\n`);
+    expect(t).toContain(`Grok Bot额度（周额度，非本单消耗）：已用 40%，剩余 60%，重置：北京时间 ${beijing(1794268800_000)}\n`);
     expect(t).toMatch(/任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}，耗时 \S+\n$/);
   });
 
@@ -169,7 +169,7 @@ describe("terminal report footer (hufu-report sink)", () => {
     expect(ok.code).toBe(0);
     const env = JSON.parse(fs.readFileSync(path.join(s.inbox, "msg", "to-dispatcher", "unread", `${ok.json().reply_id}.json`), "utf8"));
     expect(env).not.toHaveProperty("quota");
-    expect(JSON.stringify(env)).not.toContain("账号用量");
+    expect(JSON.stringify(env)).not.toContain("Grok Bot额度");
     const f = footerOf(fs.readFileSync(report, "utf8"));
     expect(f).not.toMatch(/:\/\/|bearer|webhook|secret|token/i);
   });

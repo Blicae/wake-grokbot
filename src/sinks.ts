@@ -88,7 +88,7 @@ function adoptReport(reply: Envelope, text: string, ctx: SinkContext): string {
   const allowed = REPORT_WORD_EXCEPTIONS.some((x) => x.word === present && x.status === reply.status && x.keepReport === ctx.keepReport);
   if (present && present !== word && !allowed) throw new Error("report first-line status does not match reply status");
   if (!present) text = `${word}：${(reply.summary ?? reply.title ?? "").replace(/\s+/g, " ").trim()}\n\n${text}`;
-  if (isTerminal(reply.status) && ctx.reportFooter && !/(?:^|\r?\n)---\r?\n账号用量[^\r\n]*(?:\r?\n[^\r\n]*)*$/.test(text)) {
+  if (isTerminal(reply.status) && ctx.reportFooter && !/(?:^|\r?\n)---\r?\n(?:账号用量|Grok Bot额度)[^\r\n]*(?:\r?\n[^\r\n]*)*$/.test(text)) {
     text += `${text.endsWith("\n") ? "\n" : "\n\n"}${ctx.reportFooter}\n`;
   }
   return text;

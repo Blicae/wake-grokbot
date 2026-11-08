@@ -166,11 +166,11 @@ footer is part of the report bytes: `report_sha256` in `.DONE` covers it.
 <reply body>
                               ← blank line
 ---
-账号用量（周额度，非本单消耗）：已用 62%，剩余 38%，重置：北京时间 2026-11-10 08:00:00
+Grok Bot额度（周额度，非本单消耗）：已用 62%，剩余 38%，重置：北京时间 2026-11-10 08:00:00
 任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 1小时23分45秒
 ```
 
-- 账号用量: the Grok Bot account's weekly quota as the woken Bot saw it, passed with
+- Grok Bot额度: the Grok Bot account's weekly quota as the woken Bot saw it, passed with
   `reply --quota-used/--quota-remaining/--quota-reset` (or `"quota": {used, remaining, reset}` in `reply --json`).
   Missing values read `未提供`; the reply never fails for that. A reset time in zoned ISO-8601 or epoch
   seconds/milliseconds is shown in 北京时间; anything else is shown as given with `（原样，未换算）`. Values

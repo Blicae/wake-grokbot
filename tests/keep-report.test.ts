@@ -38,7 +38,7 @@ describe("keep-report public CLI and report delivery", () => {
     expect(r.code).toBe(0);
     const bytes = fs.readFileSync(report);
     expect(bytes.toString().startsWith(original)).toBe(true);
-    expect(bytes.toString()).toContain("\n---\n账号用量");
+    expect(bytes.toString()).toContain("\n---\nGrok Bot额度");
     const hash = createHash("sha256").update(bytes).digest("hex");
     expect(JSON.parse(fs.readFileSync(report + ".DONE", "utf8"))).toMatchObject({ format: "wake-report-done/1", task_id: e.id, status: "done", report_sha256: hash });
     expect(JSON.parse(fs.readFileSync(report + ".wake.json", "utf8"))).toMatchObject({ format: "wake-sink-state/1", task_id: e.id, status: "done", phase: "committed", report_sha256: hash });
@@ -106,7 +106,7 @@ describe("keep-report public CLI and report delivery", () => {
     const body = path.join(s.dir, "body.md");
     fs.writeFileSync(body, "authored body\n");
     expect((await s.run(["reply", e.id, "--status", "done", "--summary", "safe summary", "--body-file", body])).code).toBe(0);
-    expect(fs.readFileSync(report, "utf8")).toMatch(/^就绪：safe summary\n\nauthored body\n\n---\n账号用量/);
+    expect(fs.readFileSync(report, "utf8")).toMatch(/^就绪：safe summary\n\nauthored body\n\n---\nGrok Bot额度/);
     expect((await status(s, e.id)).status).toBe("done");
   });
 
@@ -138,7 +138,7 @@ describe("keep-report public CLI and report delivery", () => {
     expect((await s.run(["reply", e.id, "--status", "done", "--keep-report", "--summary", "safe"])).code).toBe(0);
     const bytes = fs.readFileSync(report);
     expect(bytes.toString().startsWith(`就绪：safe\n\n${original}`)).toBe(true);
-    expect(bytes.toString()).toContain("\n---\n账号用量");
+    expect(bytes.toString()).toContain("\n---\nGrok Bot额度");
     expect(JSON.parse(fs.readFileSync(report + ".DONE", "utf8")).report_sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
   });
 
@@ -179,7 +179,7 @@ describe("keep-report public CLI and report delivery", () => {
     const bytes = fs.readFileSync(report);
     expect(bytes.toString().startsWith(original)).toBe(true);
     expect(bytes.toString()).not.toContain("就绪：");
-    expect(bytes.toString()).toContain("\n---\n账号用量");
+    expect(bytes.toString()).toContain("\n---\nGrok Bot额度");
     const hash = createHash("sha256").update(bytes).digest("hex");
     expect(JSON.parse(fs.readFileSync(report + ".DONE", "utf8"))).toMatchObject({ format: "wake-report-done/1", task_id: e.id, status: "done", report_sha256: hash });
     expect(JSON.parse(fs.readFileSync(report + ".wake.json", "utf8"))).toMatchObject({ status: "done", report_sha256: hash, phase: "committed" });
@@ -234,9 +234,9 @@ describe("keep-report public CLI and report delivery", () => {
     expect((await status(s, e.id)).status).toBe("working");
   });
 
-  it("an existing footer is detected by the separator and account line, not by rewritten content", async () => {
+  it.each(["账号用量", "Grok Bot额度"])("an existing %s footer is detected by the separator and account line, not by rewritten content", async (label) => {
     const { s, e, report } = await setup();
-    const original = "就绪：existing\n\nbody\n\n---\n账号用量：already supplied\n";
+    const original = `就绪：existing\n\nbody\n\n---\n${label}：already supplied\n`;
     fs.writeFileSync(report, original);
     expect((await s.run(["reply", e.id, "--status", "done", "--keep-report", "--summary", "safe"])).code).toBe(0);
     expect(fs.readFileSync(report, "utf8")).toBe(original);
