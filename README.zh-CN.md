@@ -1,5 +1,7 @@
 # wake-grokbot
 
+[Getting started / 五分钟上手](docs/getting-started.zh-CN.md) · [Local demo](examples/local-demo/README.md)
+
 [English](README.md)
 
 一个没有运行时依赖的小命令行工具：让"派活的"（dispatcher）和"干活的"（worker）两个 AI 助手通过本地收件箱互相交接任务，

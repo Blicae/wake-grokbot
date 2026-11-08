@@ -1,5 +1,7 @@
 # wake-grokbot
 
+[Getting started / 五分钟上手](docs/getting-started.md) · [Local demo](examples/local-demo/README.md)
+
 [中文说明](README.zh-CN.md)
 
 A small, dependency-free CLI that lets a **dispatcher** agent and a **worker** agent hand work to each other
