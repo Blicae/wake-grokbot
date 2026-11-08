@@ -35,7 +35,7 @@ describe("report sink v1 contract", () => {
       expect(res).toMatchObject({ ok: true, outcome: "delivered", state: "delivered" });
       expect(fs.existsSync(s.done)).toBe(false);
     }
-    expect(fs.readFileSync(s.report, "utf8").startsWith("受阻：")).toBe(true);
+    expect(fs.readFileSync(s.report, "utf8").startsWith("Blocked:")).toBe(true);
   });
   it("terminal writes a versioned marker with task, reply, revision, reply_hash and report_sha256", async () => {
     const s = setup();
@@ -59,7 +59,7 @@ describe("report sink v1 contract", () => {
     const before = fs.readFileSync(s.done, "utf8");
     expect(await s.send(reply("working", "late"), 2)).toMatchObject({ state: "superseded", outcome: "not_sent" });
     expect(fs.readFileSync(s.done, "utf8")).toBe(before);
-    expect(fs.readFileSync(s.report, "utf8").startsWith("就绪：fin")).toBe(true);
+    expect(fs.readFileSync(s.report, "utf8").startsWith("Ready: fin")).toBe(true);
   });
   it("same revision, different hash -> conflict; same revision+hash -> duplicate when consistent", async () => {
     const s = setup();

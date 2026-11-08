@@ -381,7 +381,7 @@ export class Engine {
       const r = this.store.readReceipt(id);
       if (!r) throw rule(`no such id: ${id}`);
       if (!isTerminal(r.status as Status)) r.status = status;
-      r.acked_at = new Date(this.now()).toISOString();
+      r.acked_at ??= new Date(this.now()).toISOString();
       this.store.writeReceipt(r);
       this.markRead(id);
       return { r, freed: this.settleInflight(id) };
@@ -458,7 +458,7 @@ export class Engine {
         reply,
         ...(orig.reply_to ? { reply_to: orig.reply_to } : {}),
         ...((orig.reply_to?.sink === "hufu-report" || orig.reply_to?.sink === "report-file") && isTerminal(reply.status)
-          ? { report_footer: renderFooter({ quota, startedAt: startedAt(task ?? undefined), completedAt: Date.parse(reply.sent_at) }) }
+          ? { report_footer: renderFooter({ ...(orig.reply_to.sink === "report-file" ? { locale: this.cfg.report.locale, timezone: this.cfg.report.timezone, quotaLine: this.cfg.report.quota_line } : {}), quota, startedAt: startedAt(task ?? undefined), completedAt: Date.parse(reply.sent_at) }) }
           : {}),
         ...(o.keepReport ? { keepReport: true } : {}),
         created_at: new Date(this.now()).toISOString(),

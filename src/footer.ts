@@ -1,9 +1,10 @@
 /**
  * The fixed summary block at the end of a terminal report file (done / failed / declined).
  * Times are computed by the CLI from the task receipt (ack / working) and the reply's sent_at, shown in
- * Asia/Shanghai (北京时间). The account quota is passed in by the woken Bot (the CLI cannot read it).
+ * the configured timezone. The account quota is passed in by the woken Bot (the CLI cannot read it).
  * This is receipt information only: it never changes the envelope, the webhook body or any public field.
  */
+import type { ReportLocale } from "./envelope.js";
 import type { ReplyRecord } from "./store.js";
 
 /** Account-level weekly quota as the woken Bot saw it in its session (not what this task used). */
@@ -21,7 +22,7 @@ export const NO_DURATION = "无法计算";
 const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/i;
 const SECRETISH_RE = /(authorization\s*:|bearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(sk-|ghp_|xox[abprs]-|glpat-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 
-/** Problems with quota values (empty = fine). Quota text must be short, one line, and carry no URL or secret. */
+/** Rejects non-strings, >200 characters, scheme URLs and listed secret patterns; not an exhaustive secret detector. */
 export function quotaProblems(q: Quota | undefined): string[] {
   const p: string[] = [];
   if (!q) return p;
@@ -36,12 +37,14 @@ export function quotaProblems(q: Quota | undefined): string[] {
   return p;
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-/** `YYYY-MM-DD HH:MM:SS` in Asia/Shanghai (UTC+8, no daylight saving). */
-export function beijing(ms: number): string {
-  const d = new Date(ms + 8 * 3600_000);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+/** Stable numeric date/time in an IANA timezone, including daylight-saving transitions. */
+export function zonedTime(ms: number, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(ms);
+  const get = (key: string) => parts.find((p) => p.type === key)!.value;
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
 }
+/** Compatibility helper: the original Shanghai date/time format. */
+export function beijing(ms: number): string { return zonedTime(ms, "Asia/Shanghai"); }
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)?)?$/i;
 /** An ISO-8601 time or an epoch (seconds or milliseconds) as ms; undefined when it is not a time we can trust. */
@@ -53,18 +56,19 @@ export function parseTime(s: string): number | undefined {
   }
   if (!ISO_RE.test(t)) return undefined;
   // a date or time without a zone is ambiguous: refuse rather than guess
-  if (!/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(t)) return undefined;
+  if (!/[T ]\d{2}:\d{2}.*(Z|[+-]\d{2}(:?\d{2})?)$/i.test(t)) return undefined;
   const ms = Date.parse(t.replace(" ", "T"));
   return Number.isNaN(ms) ? undefined : ms;
 }
 
 /** Chinese duration, zero units omitted: 1小时5秒, 23分, 0秒. */
-export function duration(ms: number): string {
+export function duration(ms: number, locale: ReportLocale = "zh-CN"): string {
   const s = Math.floor(ms / 1000);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
+  if (locale === "en") return [(d ? `${d}d` : ""), (h ? `${h}h` : ""), (m ? `${m}m` : ""), (sec ? `${sec}s` : "")].join("") || "0s";
   const out = (d ? `${d}天` : "") + (h ? `${h}小时` : "") + (m ? `${m}分` : "") + (sec ? `${sec}秒` : "");
   return out || "0秒";
 }
@@ -87,19 +91,29 @@ export function startedAt(r: { acked_at?: string; replies: ReplyRecord[] } | und
 const one = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /** The fixed footer (no trailing newline). `completedAt` is the terminal reply's sent_at. */
-export function renderFooter(o: { quota?: Quota; startedAt?: number; completedAt: number }): string {
+export function renderFooter(o: { quota?: Quota; startedAt?: number; completedAt: number; locale?: ReportLocale; timezone?: string; quotaLine?: boolean }): string {
+  // Omitted options preserve the historical public helper's output.
+  const locale = o.locale ?? "zh-CN";
+  const zh = locale === "zh-CN";
+  const timezone = o.timezone ?? "Asia/Shanghai";
+  const zone = zh && timezone === "Asia/Shanghai" ? "北京时间" : timezone;
+  const time = (ms: number) => `${zone} ${zonedTime(ms, timezone)}`;
   const q = o.quota ?? {};
-  const val = (v: string | undefined) => (v && one(v) ? one(v) : NOT_PROVIDED);
+  const missing = zh ? NOT_PROVIDED : "not provided";
+  const unavailable = zh ? NO_DURATION : "unavailable";
+  const val = (v: string | undefined) => (v && one(v) ? one(v) : missing);
   let reset: string;
-  if (!q.reset || !one(q.reset)) reset = NOT_PROVIDED;
+  if (!q.reset || !one(q.reset)) reset = missing;
   else {
     const ms = parseTime(q.reset);
-    reset = ms === undefined ? `${one(q.reset)}（原样，未换算）` : `北京时间 ${beijing(ms)}`;
+    reset = ms === undefined ? `${one(q.reset)}${zh ? "（原样，未换算）" : " (as given, not converted)"}` : time(ms);
   }
-  const done = `完成 北京时间 ${beijing(o.completedAt)}`;
-  const run =
-    o.startedAt === undefined
-      ? `任务执行：${NO_ACK_START}，${done}，耗时 ${NO_DURATION}`
-      : `任务执行：开始 北京时间 ${beijing(o.startedAt)}，${done}，耗时 ${o.completedAt >= o.startedAt ? duration(o.completedAt - o.startedAt) : NO_DURATION}`;
-  return [FOOTER_RULE, `Grok Bot额度（周额度，非本单消耗）：已用 ${val(q.used)}，剩余 ${val(q.remaining)}，重置：${reset}`, run].join("\n");
+  const elapsed = o.startedAt !== undefined && o.completedAt >= o.startedAt ? duration(o.completedAt - o.startedAt, locale) : unavailable;
+  const run = zh
+    ? `任务执行：${o.startedAt === undefined ? NO_ACK_START : `开始 ${time(o.startedAt)}`}，完成 ${time(o.completedAt)}，耗时 ${elapsed}`
+    : `Execution: ${o.startedAt === undefined ? "start: no ack recorded" : `started ${time(o.startedAt)}`}, completed ${time(o.completedAt)}, duration ${elapsed}`;
+  const quota = zh
+    ? `Grok Bot额度（周额度，非本单消耗）：已用 ${val(q.used)}，剩余 ${val(q.remaining)}，重置：${reset}`
+    : `Account quota (weekly, not task usage): used ${val(q.used)}, remaining ${val(q.remaining)}, reset: ${reset}`;
+  return [FOOTER_RULE, ...(o.quota !== undefined || (o.quotaLine ?? true) ? [quota] : []), run].join("\n");
 }

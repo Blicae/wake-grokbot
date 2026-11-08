@@ -165,6 +165,15 @@ export const REPORT_WORDS: Record<Status, string> = {
   declined: "无需处理",
 };
 
+/** Locale of report text; envelope status values remain language-neutral. */
+export type ReportLocale = "en" | "zh-CN";
+const EN_REPORT_WORDS: Record<Status, string> = {
+  working: "Progress", needs_input: "Waiting", done: "Ready", blocked: "Blocked", failed: "Failed", declined: "No action needed",
+};
+export function reportWords(locale: ReportLocale): Record<Status, string> {
+  return locale === "en" ? EN_REPORT_WORDS : REPORT_WORDS;
+}
+
 /** Only explicit report adoption permits a different first-line word from the envelope status. */
 export const REPORT_WORD_EXCEPTIONS = [{ word: REPORT_WORDS.blocked, status: "done", keepReport: true }] as const;
 

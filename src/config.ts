@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ReportLocale } from "./envelope.js";
 import { usage } from "./errors.js";
 import { channelNames } from "./channels/index.js";
 import { readJson } from "./fsutil.js";
@@ -46,6 +47,7 @@ export interface Config {
     commands: Record<string, { argv: string[]; timeout_seconds?: number }>;
     report_roots: string[];
   };
+  report: { locale: ReportLocale; timezone: string; quota_line: boolean };
   sources: Record<string, { require_sig?: boolean }>;
 }
 
@@ -60,6 +62,7 @@ export const DEFAULTS: Config = {
   wake: { targets: {}, hourly_cap: 60, max_attempts: 5, inflight_ttl_minutes: 30, timeout_seconds: 20 },
   targets: {},
   sinks: { file: { dir: "" }, webhooks: {}, commands: {}, report_roots: [] },
+  report: { locale: "en", timezone: "UTC", quota_line: false },
   sources: {},
 };
 
@@ -126,6 +129,15 @@ export function validateConfig(cfg: Config): string[] {
     else if (typeof o === "string" && /\b[a-z][a-z0-9+.-]*:\/\/\S+/i.test(o)) p.push(`${at.slice(0, -1)}: URLs never go into the config`);
   };
   walk(cfg, "");
+  if (cfg.report !== undefined && !isObj(cfg.report)) p.push("report must be an object");
+  else if (cfg.report !== undefined) {
+    if (!["en", "zh-CN"].includes(cfg.report.locale)) p.push("report.locale must be en or zh-CN");
+    if (typeof cfg.report.quota_line !== "boolean") p.push("report.quota_line must be a boolean");
+    try {
+      if (typeof cfg.report.timezone !== "string" || !cfg.report.timezone.trim()) throw new Error();
+      new Intl.DateTimeFormat("en", { timeZone: cfg.report.timezone }).format(0);
+    } catch { p.push("report.timezone must be an IANA timezone"); }
+  }
   const w = cfg.wake;
   for (const k of ["hourly_cap", "max_attempts", "inflight_ttl_minutes", "timeout_seconds"] as const)
     if (!Number.isInteger(w[k]) || w[k] < 1) p.push(`wake.${k} must be a positive integer`);
