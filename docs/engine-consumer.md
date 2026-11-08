@@ -11,7 +11,6 @@ Scope, agreed for 0.1:
   decides what was consumed. No engine-private code, fields or paths go into wake-grokbot.
 - There is **no consume-ack command** and none is planned. The engine watches the report file and `<report>.DONE`,
   verifies the hash, and keeps its own record of what it consumed.
-- Closing gaps of the older gbmsg channel is not a precondition for this integration.
 - The `<report>.wake.json` sidecar (`wake-sink-state/1`) exists and is **optional** for the engine to read.
 
 **Not completion on their own:** an HTTP 200 from the wake, `receipt.done`, a report file that exists, or a

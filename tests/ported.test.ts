@@ -1,4 +1,4 @@
-/** Scenarios carried over from the Python 0.7.0 suite (legacy gbmsg/wakeagent cases dropped on purpose). */
+/** Scenarios carried over from the Python 0.7.0 suite. */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
