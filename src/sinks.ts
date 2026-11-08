@@ -265,10 +265,10 @@ async function commandSink(reply: Envelope, to: ReplyTo, ctx: SinkContext): Prom
 function reportFile(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult {
   const locale = to.sink === "hufu-report" ? "zh-CN" : ctx.cfg.report.locale;
   const roots = ctx.cfg.sinks.report_roots;
-  if (!roots.length) return notSent("hufu-report sink: no sinks.report_roots configured");
+  if (!roots.length) return notSent(`${to.sink} sink: no sinks.report_roots configured`);
   const target = path.resolve(to.report_path ?? "");
-  if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent("hufu-report sink: report_path must be absolute");
-  if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent("hufu-report sink: report_path must not contain ..");
-  if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent("hufu-report sink: report_path is outside the allowed report roots");
-  return writeTarget(reply, { file: target, content: ctx.keepReport ? "" : renderReport(reply, ctx.reportFooter, locale), marker: true, locale, label: `hufu-report ${path.basename(target)}` }, ctx);
+  if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent(`${to.sink} sink: report_path must be absolute`);
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent(`${to.sink} sink: report_path must not contain ..`);
+  if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent(`${to.sink} sink: report_path is outside the allowed report roots`);
+  return writeTarget(reply, { file: target, content: ctx.keepReport ? "" : renderReport(reply, ctx.reportFooter, locale), marker: true, locale, label: `${to.sink} ${path.basename(target)}` }, ctx);
 }

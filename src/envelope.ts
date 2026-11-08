@@ -96,7 +96,7 @@ export function validate(x: unknown): string[] {
       for (const k of ["url_ref", "command_ref"]) if (typeof r[k] === "string" && !NAME_RE.test(r[k] as string)) p.push(`reply_to.${k} must be a config name, not a URL or command`);
       if (r.sink === "webhook" && typeof r.url_ref !== "string") p.push("reply_to.url_ref is required for the webhook sink");
       if (r.sink === "command" && typeof r.command_ref !== "string") p.push("reply_to.command_ref is required for the command sink");
-      if ((r.sink === "hufu-report" || r.sink === "report-file") && typeof r.report_path !== "string") p.push("reply_to.report_path is required for the hufu-report sink");
+      if ((r.sink === "hufu-report" || r.sink === "report-file") && typeof r.report_path !== "string") p.push(`reply_to.report_path is required for the ${r.sink} sink`);
       if (r.sink === "file" && typeof r.file === "string" && !/^[A-Za-z0-9._-]{1,128}$/.test(r.file)) p.push("reply_to.file must be a plain file name");
     }
   }

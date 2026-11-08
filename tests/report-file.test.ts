@@ -40,7 +40,7 @@ describe("report sink v1 contract", () => {
   it("terminal writes a versioned marker with task, reply, revision, reply_hash and report_sha256", async () => {
     const s = setup();
     const r = reply("done", "ok");
-    expect(await s.send(r, 1)).toMatchObject({ ok: true, outcome: "delivered", state: "delivered" });
+    expect(await s.send(r, 1)).toMatchObject({ ok: true, outcome: "delivered", state: "delivered", detail: "report-file r.md" });
     const m = JSON.parse(fs.readFileSync(s.done, "utf8"));
     expect(m).toMatchObject({ format: "wake-report-done/1", id: r.id, task_id: TASK, status: "done", revision: 1, reply_hash: contentHash(r), report_sha256: sha(s.report) });
     expect(m.reply_hash).not.toBe(m.report_sha256);
@@ -121,4 +121,3 @@ describe("report sink v1 contract", () => {
     expect(await s2.send(reply("done"))).toMatchObject({ ok: false, outcome: "not_sent" });
   });
 });
-
