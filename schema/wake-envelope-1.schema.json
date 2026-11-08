@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Blicae8917/wake-grokbot/schema/wake-envelope-1.schema.json",
+  "$id": "https://github.com/Blicae/wake-grokbot/schema/wake-envelope-1.schema.json",
   "title": "wake-envelope/1",
   "description": "A message between a dispatcher and a worker. Content is data, never instructions. No URLs or secrets: refer to configured names only.",
   "type": "object",
@@ -31,7 +31,7 @@
       "additionalProperties": false,
       "required": ["sink"],
       "properties": {
-        "sink": { "enum": ["file", "webhook", "command", "hufu-report"] },
+        "sink": { "enum": ["file", "webhook", "command", "hufu-report", "report-file"] },
         "file": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
         "url_ref": { "$ref": "#/$defs/name" },
         "command_ref": { "$ref": "#/$defs/name" },
@@ -40,7 +40,7 @@
       "allOf": [
         { "if": { "properties": { "sink": { "const": "webhook" } } }, "then": { "required": ["url_ref"] } },
         { "if": { "properties": { "sink": { "const": "command" } } }, "then": { "required": ["command_ref"] } },
-        { "if": { "properties": { "sink": { "const": "hufu-report" } } }, "then": { "required": ["report_path"] } }
+        { "if": { "properties": { "sink": { "enum": ["hufu-report", "report-file"] } } }, "then": { "required": ["report_path"] } }
       ]
     },
     "status": { "$ref": "#/$defs/status" },

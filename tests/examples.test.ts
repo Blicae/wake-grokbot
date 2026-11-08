@@ -46,3 +46,25 @@ describe("Claude Code hook example", () => {
     expect(fs.existsSync(got)).toBe(false);
   });
 });
+
+
+describe("local demo", () => {
+  it("follows getting-started commands in a clean directory: send -> reply -> receipt -> done", () => {
+    const s = sandbox();
+    const build = spawnSync(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.build.json"], { cwd: root, encoding: "utf8" });
+    expect(build.status, build.stderr || build.stdout).toBe(0);
+    const script = path.join(root, "examples/local-demo/demo.mjs");
+    // sandbox creates a config; the documented demo requires a fresh directory.
+    const clean = path.join(s.dir, "clean"); fs.mkdirSync(clean);
+    const demo = (action: string) => {
+      const r = spawnSync(process.execPath, [script, action], { cwd: clean, env: s.env, encoding: "utf8" });
+      expect(r.status, r.stderr || r.stdout).toBe(0); return r.stdout;
+    };
+    demo("init"); demo("send"); demo("reply");
+    expect(demo("receive")).toContain("done: Greeting ready");
+    expect(JSON.parse(demo("status")).status).toBe("done");
+    expect(fs.readFileSync(path.join(clean, "reports/greeting.md"), "utf8")).toContain("Ready: Greeting ready");
+    expect(fs.existsSync(path.join(clean, "reports/greeting.md.DONE"))).toBe(true);
+    expect(fs.readFileSync(path.join(clean, "wake.log"), "utf8").trim().split("\n")).toHaveLength(2);
+  }, 30_000);
+});

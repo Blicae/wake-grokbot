@@ -10,7 +10,7 @@ describe("basic CLI", () => {
     expect(h.code).toBe(0);
     expect(h.out).toMatch(/Exit codes/);
     expect(h.out).toMatch(/中文/);
-    expect((await s.run(["--version"])).out.trim()).toBe("0.1.2");
+    expect((await s.run(["--version"])).out.trim()).toBe("0.2.0");
     expect((await s.run(["frobnicate"])).code).toBe(2);
     expect((await s.run(["status", "--nope"])).code).toBe(2);
   });

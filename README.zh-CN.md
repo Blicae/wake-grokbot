@@ -1,5 +1,27 @@
 # wake-grokbot
 
+[![npm](https://img.shields.io/npm/v/wake-grokbot)](https://www.npmjs.com/package/wake-grokbot)
+[![CI](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+为本地编码 agent 与被唤醒的 worker agent 提供本地收件箱和唤醒 CLI，适合要在 agent 之间派活的人。
+带幂等回执、限流和防泄密；Grok Bot 例程是第一个唤醒通道，`script` 可接其它系统。
+无需账号和密钥即可试：[五分钟上手](docs/getting-started.zh-CN.md) / [双终端演示](examples/local-demo/README.md)。
+支持 Node.js 22+ 与 Windows/macOS/Linux。用户电脑不等于 Bot 云电脑，必须先配置收件箱访问方式。
+
+```mermaid
+flowchart LR
+  D[Dispatcher agent] --> C[CLI + inbox]
+  C --> W[Wake: routine or script]
+  W --> A[Worker agent]
+  A --> R[ack + reply]
+  R --> C
+  C --> F[Report + receipt]
+  F --> D
+```
+
+[Getting started / 五分钟上手](docs/getting-started.zh-CN.md) · [Local demo](examples/local-demo/README.md)
+
 [English](README.md)
 
 一个没有运行时依赖的小命令行工具：让"派活的"（dispatcher）和"干活的"（worker）两个 AI 助手通过本地收件箱互相交接任务，
@@ -13,25 +35,25 @@
 ## 快速开始
 
 ```sh
-npx --yes wake-grokbot@0.1.2 init        # 生成示例配置和收件箱目录
+npx --yes wake-grokbot@0.2.0 init        # 生成示例配置和收件箱目录
 # 把例程的网址和密钥放进环境变量：WAKE_GROKBOT_URL、WAKE_GROKBOT_KEY
 # （不要写进配置，也不要写在命令行参数里）
-npx --yes wake-grokbot@0.1.2 doctor      # 自检，不打印任何密钥
-npx --yes wake-grokbot@0.1.2 guide       # 中文使用指引
+npx --yes wake-grokbot@0.2.0 doctor      # 自检，不打印任何密钥
+npx --yes wake-grokbot@0.2.0 guide       # 中文使用指引
 ```
 
 派活：
 
 ```sh
-npx --yes wake-grokbot@0.1.2 send --to worker --title "整理说明" --objective "把安装部分写清楚"
-npx --yes wake-grokbot@0.1.2 send --json < task.json
+npx --yes wake-grokbot@0.2.0 send --to worker --title "整理说明" --objective "把安装部分写清楚"
+npx --yes wake-grokbot@0.2.0 send --json < task.json
 ```
 
 干活：
 
 ```sh
-npx --yes wake-grokbot@0.1.2 ack <id>
-npx --yes wake-grokbot@0.1.2 reply <id> --status done --summary "已改好并验证" --body-file result.md
+npx --yes wake-grokbot@0.2.0 ack <id>
+npx --yes wake-grokbot@0.2.0 reply <id> --status done --summary "已改好并验证" --body-file result.md
 ```
 
 ## 命令
@@ -58,7 +80,8 @@ npx --yes wake-grokbot@0.1.2 reply <id> --status done --summary "已改好并验
 - `file`：写成文件。
 - `webhook`：POST 到配置里登记的地址，带 HMAC-SHA256 签名头。
 - `command`：运行配置里登记的命令，结果从标准输入传进去。
-- `hufu-report`：写一个"Hufu 式报告文件"。第一行以状态词开头（进展、等待、就绪、受阻、失败、无需处理），
+- `report-file`：写本地化报告文件及 `.DONE`，默认英文、UTC、无额度行；语言、时区和额度行可配。
+- `hufu-report`：旧名，兼容保留，固定中文、Asia/Shanghai 和额度行。第一行以状态词开头（进展、等待、就绪、受阻、失败、无需处理），
   后面接一句话总结；需要人决定时第二行是 `待人工决定：…`；再往下是正文。报告写完后才创建 `<报告>.DONE` 标记。
   报告路径必须在配置允许的目录里。
 

@@ -1,7 +1,7 @@
 {
   "name": "wake-grokbot",
-  "version": "0.1.2",
-  "description": "Dispatch tasks to agents through a file inbox with idempotent receipts, and wake a Grok Bot when there is work.",
+  "version": "0.2.0",
+  "description": "Local inbox and wake-up CLI between agents, with idempotent receipts, rate limits and leak guards. Grok Bot routines first; script channel for other systems.",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -47,15 +47,23 @@
     "wake",
     "webhook",
     "dispatch",
-    "receipts"
+    "receipts",
+    "grok",
+    "xai",
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "agent-to-agent",
+    "a2a",
+    "cli"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Blicae8917/wake-grokbot.git"
+    "url": "git+https://github.com/Blicae/wake-grokbot.git"
   },
-  "homepage": "https://github.com/Blicae8917/wake-grokbot#readme",
+  "homepage": "https://github.com/Blicae/wake-grokbot#readme",
   "bugs": {
-    "url": "https://github.com/Blicae8917/wake-grokbot/issues"
+    "url": "https://github.com/Blicae/wake-grokbot/issues"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

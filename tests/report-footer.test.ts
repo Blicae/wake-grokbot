@@ -1,11 +1,14 @@
 /**
- * RD-004-A: the fixed footer at the end of a terminal report file (account weekly quota + execution time in 北京时间).
+ * the fixed footer at the end of a terminal report file (account weekly quota + execution time in 北京时间).
  * Start = ack / working (never ingest), finish = the terminal reply's sent_at; quota comes from the woken Bot.
  */
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
+import { Engine } from "../src/core.js";
+import { _setCoreTestHooks } from "../src/testhooks.js";
 import { beijing, duration, parseTime, renderFooter, startedAt } from "../src/footer.js";
 import { fixture, sandbox } from "./helpers.js";
 
@@ -161,10 +164,10 @@ describe("terminal report footer (hufu-report sink)", () => {
     const { s, e, report } = setup();
     await ingestAck(s, e);
     const bad = await reply(s, e.id, { status: "done", quota: { used: "see https://example.invalid/usage" } });
-    expect(bad.code).not.toBe(0);
+    expect(bad.code).toBe(1);
     expect(fs.existsSync(report)).toBe(false);
     const bad2 = await reply(s, e.id, { status: "done", quota: { reset: "Bearer abcdefghijklmnop" } });
-    expect(bad2.code).not.toBe(0);
+    expect(bad2.code).toBe(1);
     const ok = await reply(s, e.id, { status: "done", quota: { used: "1", remaining: "2", reset: "3" } }, ["--json"]);
     expect(ok.code).toBe(0);
     const env = JSON.parse(fs.readFileSync(path.join(s.inbox, "msg", "to-dispatcher", "unread", `${ok.json().reply_id}.json`), "utf8"));
@@ -174,14 +177,42 @@ describe("terminal report footer (hufu-report sink)", () => {
     expect(f).not.toMatch(/:\/\/|bearer|webhook|secret|token/i);
   });
 
-  it("redelivery / resend of the same reply writes the same bytes (footer fixed in the intent)", async () => {
+  it("first explicit ack wins: a later ack cannot change the footer start", async () => {
+    const { s, e, report } = setup();
+    await ingestAck(s, e, false);
+    const cfg = loadConfig({ config: s.cfgPath, env: s.env });
+    expect((await new Engine(cfg, { env: s.env, now: () => Date.parse(ACK) }).ack(e.id)).code).toBe(0);
+    const secondAck = "2026-11-07T02:30:00.000Z";
+    expect((await new Engine(cfg, { env: s.env, now: () => Date.parse(secondAck) }).ack(e.id)).code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(receiptFile(s, e.id), "utf8")).acked_at).toBe(ACK);
+    expect((await reply(s, e.id, { status: "done" })).code).toBe(0);
+    expect(footerOf(fs.readFileSync(report, "utf8"))).toContain(
+      "任务执行：开始 北京时间 2026-11-07 10:00:00，完成 北京时间 2026-11-07 11:23:45，耗时 1小时23分45秒\n",
+    );
+  });
+
+  it("redelivery reads the pending intent and preserves report bytes after a crash", async () => {
     const { s, e, report } = setup();
     await ingestAck(s, e);
-    const obj = { id: "11111111-2222-4333-8444-555555555555", status: "done", quota: { used: "a", remaining: "b", reset: "c" } };
-    expect((await reply(s, e.id, obj)).code).toBe(0);
+    const cfg = loadConfig({ config: s.cfgPath, env: s.env });
+    const eng = new Engine(cfg, { env: s.env, now: () => Date.parse(DONE) });
+    const crash = new Error("simulated crash after report write, before delivery settlement");
+    _setCoreTestHooks(eng, { fault: (point) => { if (point === "reply:after-deliver") throw crash; } });
+    const obj = { id: "11111111-2222-4333-8444-555555555555", status: "done" as const, sent_at: DONE,
+      summary: "s", body: "正文第一行\n正文第二行", quota: { used: "a", remaining: "b", reset: "c" } };
+    await expect(eng.reply(e.id, obj)).rejects.toBe(crash);
     const first = fs.readFileSync(report);
+    const pending = eng.store.readIntent(obj.id);
+    expect(pending?.report_footer).toBe(footerOf(first.toString()).trimEnd());
+    expect(pending?.report_footer).toContain("开始 北京时间 2026-11-07 10:00:00");
     patchReceipt(s, e.id, (r) => (r.acked_at = "2026-11-07T00:00:00Z"));
-    await reply(s, e.id, obj);
+    // A later clock makes the interrupted attempt stale; hufu-report is replay-safe.
+    const restarted = new Engine(cfg, { env: s.env, now: () => Date.parse(DONE) + 3600_000 });
+    expect((await restarted.redeliver(obj.id)).code).toBe(0);
     expect(fs.readFileSync(report).equals(first)).toBe(true);
+    const delivery = JSON.parse(fs.readFileSync(receiptFile(s, e.id), "utf8")).replies[0].delivery;
+    expect(delivery.state).toBe("delivered");
+    expect(delivery.attempts).toBe(2);
+    expect(restarted.store.readIntent(obj.id)).toBeNull();
   });
 });

@@ -24,7 +24,7 @@ engine ◀── <report>.md + <report>.md.DONE ◀────────┘ (
 
 `report_roots` lists the only folders reports may be written to. The wake URL and key come from environment
 variables (see `wake-grokbot doctor`), never from the config or the envelope. On Windows, use drive-letter
-absolute paths (in JSON, backslashes are escaped), for example `"report_roots": ["D:\\Code\\8917\\open-source\\example-reports"]`;
+absolute paths (in JSON, backslashes are escaped), for example `"report_roots": ["C:\\reports"]`;
 this and every other path in this page is an illustration, not a production location. Relative `report_roots`
 and `sign.key_file` values are resolved against the folder of the config file.
 
@@ -75,7 +75,7 @@ Rules the engine must follow:
 - No URLs and no secrets anywhere in the envelope (exit 1). Refer to configured names instead.
 - `report_path` is absolute, has no `..`, lies inside a `report_roots` folder (not the root itself), and is unique
   per task. The fixture's `/srv/reports/build-summary.md` is a Unix example; on Windows use a drive-letter path such as
-  `D:\Code\8917\open-source\example-reports\<task-uuid>.md` (JSON: `"D:\\Code\\8917\\open-source\\example-reports\\<task-uuid>.md"`).
+  `C:\reports\<task-uuid>.md` (JSON: `"C:\\reports\\<task-uuid>.md"`).
   A path outside the roots is refused when the reply is delivered (`reply` exits 5, nothing written), not at `ingest`.
 - Optional `expires_at` (RFC 3339 date-time, as `format: date-time` in the schema). `ingest` (and `send`) check the id first: an id it has already accepted follows the
   idempotency rules (same content → 0/5/6 from the recorded wake state, different → 7) with no expiry check, so
@@ -144,6 +144,10 @@ for `.DONE` on `needs_input`/`blocked` must poll the report (or `<report>.wake.j
 `status: "done"` and first line `就绪：`; `done` with `受阻：` is terminal delivery, not success;
 `failed` and `declined` are final but not success. Verify `report_sha256` against the report.
 
+Report file layout below describes `hufu-report` (legacy name, retained for compatibility / 旧名，兼容保留).
+For `report-file`, configurable locale/timezone, optional quota and the English status table, see
+[Report language and time](protocol.md#report-language-and-time). Lock, path and marker guarantees are shared.
+
 Report file layout:
 
 ```
@@ -174,7 +178,10 @@ Grok Bot额度（周额度，非本单消耗）：已用 62%，剩余 38%，重�
   `reply --quota-used/--quota-remaining/--quota-reset` (or `"quota": {used, remaining, reset}` in `reply --json`).
   Missing values read `未提供`; the reply never fails for that. A reset time in zoned ISO-8601 or epoch
   seconds/milliseconds is shown in 北京时间; anything else is shown as given with `（原样，未换算）`. Values
-  containing a URL or something secret-like are refused (exit 1, nothing written).
+  must not include URLs or credentials. Validation rejects non-strings, values over 200 characters, URLs with a
+  scheme (`…://`), `Authorization:` headers, bearer tokens (at least 8 token characters), key prefixes
+  `sk-`, `ghp_`, `xox[abprs]-`, `glpat-` (at least 8 following key characters), and private-key headers
+  (exit 1, nothing written). This is not exhaustive: `www.example.invalid/usage` and `api_key=…` are not detected.
 - 任务执行: computed by the CLI. Start = the earliest `ack` or non-terminal (`working` / `needs_input`) reply in
   the task receipt, never the ingest/queue time; finish = the terminal reply's `sent_at`. Without an ack the
   line reads `任务执行：开始时间：未记录领单（ack）时间，完成 北京时间 …，耗时 无法计算`. Duration is Chinese with
@@ -228,3 +235,5 @@ Procedure (before an upgrade, and whenever such a message appears):
 Windows: pid liveness uses the same check; equivalence of process termination on Windows is pending platform
 validation.
 
+
+Report root examples: `C:\reports` on Windows; `/srv/reports` on Linux/macOS. Use an absolute path available to the consumer.

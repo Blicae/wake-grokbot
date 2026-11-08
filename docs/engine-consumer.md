@@ -1,6 +1,6 @@
 # Engine consumer guide (wake-grokbot 0.1)
 
-For a task engine (for example a Hufu-style engine) that hands tasks to a worker seat through wake-grokbot and
+For a task engine that hands tasks to a worker seat through wake-grokbot and
 consumes the reports that come back. It describes only public formats and the public CLI, as implemented in
 v0.1.0 (frozen commit `e0c27d07`). Where older notes disagree with the code, this page follows the code.
 
@@ -11,14 +11,13 @@ Scope, agreed for 0.1:
   decides what was consumed. No engine-private code, fields or paths go into wake-grokbot.
 - There is **no consume-ack command** and none is planned. The engine watches the report file and `<report>.DONE`,
   verifies the hash, and keeps its own record of what it consumed.
-- Closing gaps of the older gbmsg channel is not a precondition for this integration.
 - The `<report>.wake.json` sidecar (`wake-sink-state/1`) exists and is **optional** for the engine to read.
 
 **Not completion on their own:** an HTTP 200 from the wake, `receipt.done`, a report file that exists, or a
 `.DONE` file that exists. Completion needs all of: the marker belongs to your task, the status is terminal, the
 report bytes match `report_sha256`, and your engine recorded the consumption exactly once (section 8).
 
-Deployment assumed here: the engine, the CLI, the inbox and the report folders are on the same machine.
+Deployment assumed here: the engine, CLI, inbox and report folders share one host. The worker may be remote. Your computer is not the Bot cloud computer: the worker needs an explicitly available access method to read/write this inbox on that host. See [Getting started](getting-started.md). This guide’s hufu-report examples describe the legacy alias (旧名，兼容保留); new integrations can use report-file with the locale settings in protocol.md.
 
 ```
 engine --ingest--> inbox --wake--> worker seat
@@ -50,7 +49,7 @@ Windows example envelope (all values are illustrations):
   "authorization": "inferred",
   "reply_to": {
     "sink": "hufu-report",
-    "report_path": "D:\\Code\\8917\\open-source\\example-reports\\<task-uuid>.md"
+    "report_path": "C:\\reports\\<task-uuid>.md"
   },
   "task": { "ref": { "ticket_id": "B-7", "card_path": "cards/B-7.md" } },
   "sent_at": "2026-11-05T05:00:00Z"
@@ -84,11 +83,11 @@ Rules:
 Example layout (illustration, not a production path):
 
 ```
-report_roots:  D:\Code\8917\open-source\example-reports
-report:        D:\Code\8917\open-source\example-reports\<task-uuid>.md
-marker:        D:\Code\8917\open-source\example-reports\<task-uuid>.md.DONE
-sidecar:       D:\Code\8917\open-source\example-reports\<task-uuid>.md.wake.json   (optional to read)
-lock:          D:\Code\8917\open-source\example-reports\<task-uuid>.md.lock        (do not touch)
+report_roots:  C:\reports
+report:        C:\reports\<task-uuid>.md
+marker:        C:\reports\<task-uuid>.md.DONE
+sidecar:       C:\reports\<task-uuid>.md.wake.json   (optional to read)
+lock:          C:\reports\<task-uuid>.md.lock        (do not touch)
 ```
 
 On Unix the same shape applies, e.g. `/srv/reports/<task-uuid>.md` as in the public fixture.
@@ -271,3 +270,4 @@ for diagnosis; they are not a consumption record.
 - rely on private formats of any engine or channel inside wake-grokbot.
 
 See also: [engine-interface.md](engine-interface.md), [protocol.md](protocol.md), [threat-model.md](threat-model.md).
+Report root examples: `C:\reports` on Windows; `/srv/reports` on Linux/macOS. Use an absolute path available to the consumer.

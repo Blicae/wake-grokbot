@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { run } from "./channels/script.js";
 import type { Config } from "./config.js";
-import { type Envelope, isTerminal, REPORT_WORDS, REPORT_WORD_EXCEPTIONS, type ReplyTo } from "./envelope.js";
+import { type Envelope, isTerminal, reportWords, type ReportLocale, type ReplyTo } from "./envelope.js";
 import { atomicWrite, isInside, tryLock } from "./fsutil.js";
 import { postJson, resolveUrl } from "./net.js";
 import { mask, registerSecret } from "./secrets.js";
@@ -55,7 +55,7 @@ export const _testHooks: { fault?: (after: WriteWindow) => void } = {};
 
 /** True when the sink can be replayed safely with the same delivery (file and report sinks are idempotent). */
 export function sinkReplaySafe(to: ReplyTo): boolean {
-  return to.sink === "file" || to.sink === "hufu-report";
+  return to.sink === "file" || to.sink === "hufu-report" || to.sink === "report-file";
 }
 
 export const SIGNATURE_HEADER = "x-wake-grokbot-signature";
@@ -67,28 +67,34 @@ export function webhookSignature(secret: string, timestamp: string, body: string
 }
 
 /**
- * First line, optional decision line, blank line, body. Status words follow the Hufu-style report convention.
+ * First line, optional decision line, blank line, body. Status words follow the selected report locale.
  * A terminal report may end with a fixed footer (blank line, then the footer block); non-terminal reports never do.
  */
-export function renderReport(reply: Envelope, footer?: string): string {
-  const word = REPORT_WORDS[reply.status ?? "working"];
+export function renderReport(reply: Envelope, footer?: string, locale: ReportLocale = "zh-CN"): string {
+  const word = reportWords(locale)[reply.status ?? "working"];
+  const colon = locale === "en" ? ": " : "：";
   const one = (s: string) => s.replace(/\s+/g, " ").trim();
-  const lines = [`${word}：${one(reply.summary ?? reply.title ?? "")}`];
-  if (reply.status === "needs_input" && reply.question) lines.push(`待人工决定：${one(reply.question)}`);
+  const lines = [`${word}${colon}${one(reply.summary ?? reply.title ?? "")}`];
+  if (reply.status === "needs_input" && reply.question) lines.push(`${locale === "en" ? "Decision required: " : "待人工决定："}${one(reply.question)}`);
   lines.push("", (reply.body ?? "").replace(/\r\n/g, "\n").trimEnd(), "");
   if (footer && isTerminal(reply.status)) lines.push(footer, "");
   return lines.join("\n");
 }
 
 /** Preserve authored text; only supply a missing protocol header/footer. Called under the target lock. */
-function adoptReport(reply: Envelope, text: string, ctx: SinkContext): string {
-  const word = REPORT_WORDS[reply.status ?? "working"];
+function adoptReport(reply: Envelope, text: string, ctx: SinkContext, configuredLocale: ReportLocale): string {
   const first = text.split(/\r?\n/, 1)[0] ?? "";
-  const present = Object.values(REPORT_WORDS).find((w) => first.startsWith(`${w}：`));
-  const allowed = REPORT_WORD_EXCEPTIONS.some((x) => x.word === present && x.status === reply.status && x.keepReport === ctx.keepReport);
+  // An authored report's header selects its language, independently of current config.
+  const locale: ReportLocale = Object.values(reportWords("en")).some((w) => first.startsWith(`${w}:`)) ? "en" :
+    Object.values(reportWords("zh-CN")).some((w) => first.startsWith(`${w}：`)) ? "zh-CN" : configuredLocale;
+  const words = reportWords(locale);
+  const word = words[reply.status ?? "working"];
+  const colon = locale === "en" ? ":" : "：";
+  const present = Object.values(words).find((w) => first.startsWith(`${w}${colon}`));
+  const allowed = present === words.blocked && reply.status === "done" && ctx.keepReport;
   if (present && present !== word && !allowed) throw new Error("report first-line status does not match reply status");
-  if (!present) text = `${word}：${(reply.summary ?? reply.title ?? "").replace(/\s+/g, " ").trim()}\n\n${text}`;
-  if (isTerminal(reply.status) && ctx.reportFooter && !/(?:^|\r?\n)---\r?\n(?:账号用量|Grok Bot额度)[^\r\n]*(?:\r?\n[^\r\n]*)*$/.test(text)) {
+  if (!present) text = `${word}${colon}${locale === "en" ? " " : ""}${(reply.summary ?? reply.title ?? "").replace(/\s+/g, " ").trim()}\n\n${text}`;
+  if (isTerminal(reply.status) && ctx.reportFooter && !/(?:^|\r?\n)---\r?\n(?:账号用量|Grok Bot额度|Account quota|Execution:|任务执行：)[^\r\n]*(?:\r?\n[^\r\n]*)*$/.test(text)) {
     text += `${text.endsWith("\n") ? "\n" : "\n\n"}${ctx.reportFooter}\n`;
   }
   return text;
@@ -103,8 +109,9 @@ export async function deliver(reply: Envelope, to: ReplyTo, ctx: SinkContext): P
         return await webhookSink(reply, to, ctx);
       case "command":
         return await commandSink(reply, to, ctx);
+      case "report-file":
       case "hufu-report":
-        return hufuReport(reply, to, ctx);
+        return reportFile(reply, to, ctx);
       default:
         return { ok: false, outcome: "not_sent", detail: `unknown sink ${String((to as ReplyTo).sink)}` };
     }
@@ -139,6 +146,7 @@ interface Target {
   /** report sink: write `<file>.DONE` for terminal statuses */
   marker: boolean;
   label: string;
+  locale?: ReportLocale;
 }
 
 /**
@@ -160,7 +168,7 @@ function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
     const st = parseMaybe(readMaybe(stateFile));
     const existing = readMaybe(t.file);
     if (ctx.keepReport && t.marker && !existing) return notSent(`${t.label}: keep-report requires an existing report`, "conflict");
-    const bytes = Buffer.from(ctx.keepReport && t.marker ? adoptReport(reply, existing!.toString("utf8"), ctx) : t.content, "utf8");
+    const bytes = Buffer.from(ctx.keepReport && t.marker ? adoptReport(reply, existing!.toString("utf8"), ctx, t.locale ?? "zh-CN") : t.content, "utf8");
     const fileHash = sha256(bytes);
     const assoc = d ? { task_id: d.taskId, revision: d.revision, reply_hash: d.replyHash } : {};
     if (!d) {
@@ -254,12 +262,13 @@ async function commandSink(reply: Envelope, to: ReplyTo, ctx: SinkContext): Prom
 }
 
 /** Report sink: the path must be absolute and inside an allowed root (never remapped). `.DONE` only for terminal statuses. */
-function hufuReport(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult {
+function reportFile(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult {
+  const locale = to.sink === "hufu-report" ? "zh-CN" : ctx.cfg.report.locale;
   const roots = ctx.cfg.sinks.report_roots;
-  if (!roots.length) return notSent("hufu-report sink: no sinks.report_roots configured");
+  if (!roots.length) return notSent(`${to.sink} sink: no sinks.report_roots configured`);
   const target = path.resolve(to.report_path ?? "");
-  if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent("hufu-report sink: report_path must be absolute");
-  if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent("hufu-report sink: report_path must not contain ..");
-  if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent("hufu-report sink: report_path is outside the allowed report roots");
-  return writeTarget(reply, { file: target, content: ctx.keepReport ? "" : renderReport(reply, ctx.reportFooter), marker: true, label: `hufu-report ${path.basename(target)}` }, ctx);
+  if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent(`${to.sink} sink: report_path must be absolute`);
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent(`${to.sink} sink: report_path must not contain ..`);
+  if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent(`${to.sink} sink: report_path is outside the allowed report roots`);
+  return writeTarget(reply, { file: target, content: ctx.keepReport ? "" : renderReport(reply, ctx.reportFooter, locale), marker: true, locale, label: `${to.sink} ${path.basename(target)}` }, ctx);
 }

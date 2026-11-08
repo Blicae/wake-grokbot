@@ -124,3 +124,31 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 | `failed` | `failed` |
 | `blocked` | `failed` (with the reason) or `input-required` when a person can unblock it |
 | `declined` | `rejected` |
+
+`report-file` writes a report and terminal `.DONE` marker under an allowed report root. `hufu-report` is the legacy name, retained for compatibility（旧名，兼容保留）. Both require `reply_to.report_path`; envelope version remains `wake-envelope/1`.
+
+## Report language and time
+
+Configure `report: { "locale": "en", "timezone": "UTC", "quota_line": false }`.
+Supported locales: `en`, `zh-CN`; timezone must be an IANA name (validated on load and by `doctor`, exit 2 on error).
+`report-file` uses these defaults. `hufu-report` (legacy name, retained for compatibility / 旧名，兼容保留)
+always uses `zh-CN`, `Asia/Shanghai`, and a quota line regardless of these settings.
+An explicitly supplied quota emits the quota line even when `quota_line` is false. Missing values remain
+`not provided` / `未提供`. The CLI cannot query account usage; it comes from the responding agent.
+
+| Envelope status | en | zh-CN |
+| --- | --- | --- |
+| working | Progress | 进展 |
+| needs_input | Waiting | 等待 |
+| done | Ready | 就绪 |
+| blocked | Blocked | 受阻 |
+| failed | Failed | 失败 |
+| declined | No action needed | 无需处理 |
+
+Decision line: `Decision required: ...` / `待人工决定：...`.
+English headers use `: `; Chinese headers use `：`. English durations use `d`, `h`, `m`, `s` (zero: `0s`).
+English footer labels are `Account quota (weekly, not task usage)` and `Execution`.
+`--keep-report` recognizes the authored header's locale, independent of current configuration.
+Only `Blocked:` / `受阻：` may accompany `done --keep-report`: that means terminal delivery, not success.
+`blocked --keep-report` remains non-terminal, with no terminal footer or `.DONE`. Other header/status mismatches are refused.
+Existing English quota/execution footers and both old Chinese quota labels are recognized without duplication.

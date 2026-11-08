@@ -3,7 +3,7 @@
 ## Reporting
 
 Please report vulnerabilities privately through GitHub's "Report a vulnerability" button on
-https://github.com/Blicae8917/wake-grokbot/security. Do not open a public issue for a security problem.
+https://github.com/Blicae/wake-grokbot/security. Do not open a public issue for a security problem.
 
 ## What wake-grokbot promises
 

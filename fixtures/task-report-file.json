@@ -1,0 +1,21 @@
+{
+  "v": "wake-envelope/1",
+  "id": "55555555-5555-4555-8555-555555555555",
+  "type": "task",
+  "from": "my-engine",
+  "to": "worker",
+  "title": "Summarise the build log",
+  "objective": "Read the latest build log and report whether it passed.",
+  "authorization": "inferred",
+  "reply_to": {
+    "sink": "report-file",
+    "report_path": "/srv/reports/build-summary.md"
+  },
+  "task": {
+    "ref": {
+      "ticket_id": "B-7",
+      "card_path": "cards/B-7.md"
+    }
+  },
+  "sent_at": "2026-11-05T05:00:00Z"
+}

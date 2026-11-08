@@ -1,5 +1,5 @@
 /**
- * RD-001-G audit repair (M1–M5, S3) against 97243e8. Each case reproduces an audit finding with local mocks only
+ * audit repair (M1–M5, S3) against 97243e8. Each case reproduces an audit finding with local mocks only
  * (127.0.0.1 stub server, sandbox report roots); nothing real is sent.
  */
 import * as fs from "node:fs";

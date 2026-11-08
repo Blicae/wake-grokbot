@@ -1,5 +1,5 @@
 /**
- * RD-001-G-A reliability core: crash windows in accept/reply, delivery state separate from business status,
+ * reliability core: crash windows in accept/reply, delivery state separate from business status,
  * no silent webhook resend, expiry before execution. Crashes are simulated with the test-only `fault` hook.
  * All network traffic goes to a local stub server; nothing real is sent.
  */
