@@ -124,3 +124,5 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 | `failed` | `failed` |
 | `blocked` | `failed` (with the reason) or `input-required` when a person can unblock it |
 | `declined` | `rejected` |
+
+`report-file` writes a report and terminal `.DONE` marker under an allowed report root. `hufu-report` is the legacy name, retained for compatibility（旧名，兼容保留）. Both require `reply_to.report_path`; envelope version remains `wake-envelope/1`.

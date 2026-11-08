@@ -55,7 +55,7 @@ export const _testHooks: { fault?: (after: WriteWindow) => void } = {};
 
 /** True when the sink can be replayed safely with the same delivery (file and report sinks are idempotent). */
 export function sinkReplaySafe(to: ReplyTo): boolean {
-  return to.sink === "file" || to.sink === "hufu-report";
+  return to.sink === "file" || to.sink === "hufu-report" || to.sink === "report-file";
 }
 
 export const SIGNATURE_HEADER = "x-wake-grokbot-signature";
@@ -103,8 +103,9 @@ export async function deliver(reply: Envelope, to: ReplyTo, ctx: SinkContext): P
         return await webhookSink(reply, to, ctx);
       case "command":
         return await commandSink(reply, to, ctx);
+      case "report-file":
       case "hufu-report":
-        return hufuReport(reply, to, ctx);
+        return reportFile(reply, to, ctx);
       default:
         return { ok: false, outcome: "not_sent", detail: `unknown sink ${String((to as ReplyTo).sink)}` };
     }
@@ -254,7 +255,7 @@ async function commandSink(reply: Envelope, to: ReplyTo, ctx: SinkContext): Prom
 }
 
 /** Report sink: the path must be absolute and inside an allowed root (never remapped). `.DONE` only for terminal statuses. */
-function hufuReport(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult {
+function reportFile(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult {
   const roots = ctx.cfg.sinks.report_roots;
   if (!roots.length) return notSent("hufu-report sink: no sinks.report_roots configured");
   const target = path.resolve(to.report_path ?? "");

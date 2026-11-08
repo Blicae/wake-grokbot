@@ -68,3 +68,10 @@ describe("canonical form and signatures", () => {
     expect(verify(e, key)).toBe("missing");
   });
 });
+
+it("report-file requires report_path in schema and validator", () => {
+  const e = fixture("task-report-file.json");
+  delete e.reply_to.report_path;
+  expect(check(e)).toBe(false);
+  expect(validate(e).join()).toContain("report_path");
+});

@@ -457,7 +457,7 @@ export class Engine {
         ...(target ? { target } : {}),
         reply,
         ...(orig.reply_to ? { reply_to: orig.reply_to } : {}),
-        ...(orig.reply_to?.sink === "hufu-report" && isTerminal(reply.status)
+        ...((orig.reply_to?.sink === "hufu-report" || orig.reply_to?.sink === "report-file") && isTerminal(reply.status)
           ? { report_footer: renderFooter({ quota, startedAt: startedAt(task ?? undefined), completedAt: Date.parse(reply.sent_at) }) }
           : {}),
         ...(o.keepReport ? { keepReport: true } : {}),
