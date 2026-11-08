@@ -39,14 +39,14 @@ Commands:
   status [<id>] [--json] [--mark-wake started|not_started]
                               show a receipt (or the outbox); reconcile an unknown wake by hand
   ack <id> [--status working] mark a message as picked up
-  reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|-]
+  reply <id> --status <s> [--summary <t>] [--question <q>] [--next <n>] [--body-file <f>|- | --keep-report]
   reply <id> --json [file|-]  reply with a partial envelope from a file or stdin (status, summary, body, ...);
                               a top-level "quota": {used, remaining, reset} is read for the report footer
                               [--quota-used <t>] [--quota-remaining <t>] [--quota-reset <time>]
                               account weekly quota as the woken Bot sees it (not this task's cost); shown in
                               the footer of a done/failed/declined report file, with start/finish in 北京时间
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
-  redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]
+  redeliver <reply-id> [--keep-report] [--accept-duplicate-risk] [--after-contract-fix]
                               send one reply to its sink again by hand (unknown outcomes need the risk flag;
                               a sink contract violation needs --after-contract-fix once the sink is fixed)
   release [<target>]          the woken run is finished: free the wake slot, send what queued meanwhile
@@ -83,6 +83,7 @@ const OPTIONS = {
   objective: { type: "string" },
   project: { type: "string" },
   "body-file": { type: "string" },
+  "keep-report": { type: "boolean" },
   acceptance: { type: "string", multiple: true },
   status: { type: "string" },
   summary: { type: "string" },
@@ -243,6 +244,7 @@ async function run(argv: string[], io: Io): Promise<number> {
     case "reply": {
       const id = pos[0];
       if (!id) throw usage("reply <id> --status <status>");
+      if (o["keep-report"] && o["body-file"] !== undefined) throw usage("--keep-report and --body-file are mutually exclusive");
       let input: Partial<Envelope> & { status: Status; quota?: Quota };
       if (!o.status && (o.json || pos[1])) {
         const j = parseJson(await readInput(io, pos[1]), "reply") as Partial<Envelope> & { quota?: unknown };
@@ -262,6 +264,7 @@ async function run(argv: string[], io: Io): Promise<number> {
           ...(o["body-file"] ? { body: await readInput(io, o["body-file"]) } : {}),
         };
       }
+      if (o["keep-report"] && input.body !== undefined) throw usage("--keep-report and JSON body are mutually exclusive");
       const fq: Quota = {
         ...(input.quota ?? {}),
         ...(o["quota-used"] !== undefined ? { used: o["quota-used"] } : {}),
@@ -269,7 +272,7 @@ async function run(argv: string[], io: Io): Promise<number> {
         ...(o["quota-reset"] !== undefined ? { reset: o["quota-reset"] } : {}),
       };
       if (Object.keys(fq).length) input.quota = fq;
-      const r = await eng.reply(id, input);
+      const r = await eng.reply(id, input, { keepReport: !!o["keep-report"] });
       return print(r, { reply_id: r.replyId });
     }
     case "watch": {
@@ -287,9 +290,10 @@ async function run(argv: string[], io: Io): Promise<number> {
       }
     }
     case "redeliver": {
+      if (o["keep-report"] && o["body-file"] !== undefined) throw usage("--keep-report and --body-file are mutually exclusive");
       const id = pos[0];
-      if (!id) throw usage("redeliver <reply-id> [--accept-duplicate-risk] [--after-contract-fix]");
-      return print(await eng.redeliver(id, { acceptRisk: !!o["accept-duplicate-risk"], afterContractFix: !!o["after-contract-fix"] }));
+      if (!id) throw usage("redeliver <reply-id> [--keep-report] [--accept-duplicate-risk] [--after-contract-fix]");
+      return print(await eng.redeliver(id, { acceptRisk: !!o["accept-duplicate-risk"], afterContractFix: !!o["after-contract-fix"], keepReport: !!o["keep-report"] }));
     }
     case "release": {
       const r = await eng.release(o.target ?? pos[0]);

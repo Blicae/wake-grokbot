@@ -47,7 +47,7 @@ describe("webhook sink", () => {
     const s = sandbox({ sinks: { webhooks: { h: { url_env: "H_URL", secret_env: "H_SECRET" }, nosecret: { url_env: "H_URL", secret_env: "UNSET" } } } }, { H_URL: srv.url, H_SECRET: "x-secret-value-1" });
     const a = await sendAndReply(s, { sink: "webhook", url_ref: "nope" });
     expect(a.r.code).toBe(5);
-    expect(a.r.json().status).toBe("done");
+    expect(a.r.json().status).toBe("queued");
     expect((await sendAndReply(s, { sink: "webhook", url_ref: "nosecret" })).r.code).toBe(5);
     const c = await sendAndReply(s, { sink: "webhook", url_ref: "h" });
     expect(c.r.code).toBe(5);

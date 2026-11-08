@@ -100,6 +100,12 @@ wake-grokbot ack <id>                                   # picked up → status w
 wake-grokbot reply <id> --status done --summary "build passed" --body-file result.md
 ```
 
+For an already-authored report, use `reply <id> --status done --keep-report --summary "safe summary"`
+without `--body-file` or JSON `body`. The report must exist and not belong to another task. Its body stays
+on disk (URLs do not enter the envelope); missing status line/footer is supplied. Use
+`redeliver <reply-id> --keep-report` after an unowned-file conflict. `受阻：` + `done --keep-report` is terminal
+delivery, not business success; `blocked --keep-report` stays non-terminal. See [consumer rules](engine-consumer.md#3-the-report-wake-report1).
+
 Statuses: `working`, `needs_input` (needs `--question`), `done`, `blocked`, `failed`, `declined`.
 
 ## 4. Reporting completion: report file + `.DONE`
@@ -124,16 +130,19 @@ For `reply_to.sink = "hufu-report"` (report layout `wake-report/1`, marker forma
    (`task_id`, `revision`, `reply_hash` are present only when the caller passed a task delivery).
 
 Ordering with a task delivery: an older revision, or a non-terminal reply after a terminal one, is `superseded`
-(nothing written); the same revision with other content, a path owned by another task, or an existing unowned
-file is a `conflict`; the same revision and content is a `duplicate` only when the report and marker on disk
+(nothing written). The same revision with other content or a path owned by another task is always a
+`conflict`. An existing unowned file is also a `conflict` unless explicitly adopted with `--keep-report`.
+The same revision and content is a `duplicate` only when the report and marker on disk
 match (`reply_id`, `status`, actual report bytes vs `report_sha256`, committed phase, and the marker), otherwise
 the same delivery repairs its own half-finished writes (any crash window: after intent, report, sidecar or
-marker). Files with no `.wake.json` owner are never overwritten. `reply_hash` and `report_sha256` are different values.
+marker). Files with no `.wake.json` owner are never overwritten without explicit `--keep-report` adoption.
+`reply_hash` and `report_sha256` are different values.
 
 **Migration (breaking for earlier development builds).** Before v1 every status wrote `.DONE` as
 `{"id","status","at"}`. Now `.DONE` appears only for terminal statuses and carries `format`. A reader that waited
-for `.DONE` on `needs_input`/`blocked` must poll the report (or `<report>.wake.json`) instead. Success means
-`status: "done"`; `failed` and `declined` are final but not success. Verify `report_sha256` against the report.
+for `.DONE` on `needs_input`/`blocked` must poll the report (or `<report>.wake.json`) instead. Business success means
+`status: "done"` and first line `就绪：`; `done` with `受阻：` is terminal delivery, not success;
+`failed` and `declined` are final but not success. Verify `report_sha256` against the report.
 
 Report file layout:
 
@@ -178,7 +187,8 @@ The engine waits for `<report>.DONE`, checks `format` and `report_sha256`, then 
 points at a half-written report. Final states are `done`, `failed`, `declined`; on `needs_input` or `blocked` the engine may answer with a new envelope
 in the same `thread`. The reply envelope also lands in `msg/to-dispatcher/unread/` and the task's receipt records
 `sink_result`. If the sink refuses (for example a path outside `report_roots`), `reply` exits 5 and no report or
-`.DONE` is written.
+`.DONE` is written. With a sink, business status stays unchanged until delivery succeeds;
+the pending reply remains visible.
 
 Consuming is the engine's own job. There is **no** consume-ack command: the engine watches the report and
 `<report>.DONE`, checks `format`, `task_id`, `status` and `report_sha256`, and records what it consumed as

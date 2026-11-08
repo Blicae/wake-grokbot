@@ -77,7 +77,8 @@ Rules:
 - No `..` segment.
 - Inside one of the configured `sinks.report_roots` folders, and not the root folder itself.
 - **Unique per task.** Do not let two unfinished tasks share a path. A path owned by another task, or an existing
-  report, `.DONE` or `.wake.json` without an owner, is a `conflict` and is never overwritten.
+  report, `.DONE` or `.wake.json` without an owner, is a `conflict` by default. Only explicit `--keep-report`
+  can adopt an existing report without a sidecar (or owned by this task); another task's report is never overwritten.
 - Checked when the seat replies, not at ingest: an out-of-roots path makes `reply` exit 5 and nothing is written.
 
 Example layout (illustration, not a production path):
@@ -111,7 +112,18 @@ Same `id`, different content: exit 7, nothing written. A known id is not checked
 
 The seat runs `wake-grokbot ack <id>` (status `working`) and later
 `wake-grokbot reply <id> --status <status> --summary "<one line>" --body-file <file>`.
-The report file is UTF-8, LF line endings:
+For an already-authored report at the agreed path, use
+`wake-grokbot reply <id> --status done --keep-report --summary "safe one-line summary"`.
+Do not pass `--body-file` or a JSON `body` together with `--keep-report` (usage error). The existing file must
+exist and not belong to another task. Its body, including any URLs, stays on disk and never enters the reply
+envelope; summary and other envelope fields still undergo URL/credential validation. Missing status lines
+and terminal footers are supplied, existing matching titles/footers are preserved, and ownership/marker
+checksums cover the final bytes. `redeliver <reply-id> --keep-report` repairs an earlier unowned-file conflict.
+Without a sink, reply behavior is unchanged; with a sink, task status changes only after confirmed
+delivery. A failed write exits 5 and leaves the old business status plus the pending reply visible in `status`.
+
+The body-file route remains supported: give a body without URLs or a pre-added `就绪：` line, omit
+`--keep-report`, and the CLI generates the report. Generated reports use UTF-8, LF line endings:
 
 ```
 <status word>：<one-line summary>
@@ -127,12 +139,19 @@ The separator after the status word is the full-width colon `：`.
 | `working` | 进展 | no | in progress |
 | `needs_input` | 等待 | no | answer with a new envelope (new `id`) in the same `thread` |
 | `blocked` | 受阻 | no | not finished, not success |
-| `done` | 就绪 | yes | **the only business success** |
+| `done` | 就绪 (or 受阻 with `--keep-report`) | yes | 就绪 is business success; 受阻 is final delivery, not success |
 | `failed` | 失败 | yes | final, not success |
 | `declined` | 无需处理 | yes | final, not success |
 
 For non-terminal statuses the report is the current-progress view (overwritten, no append log). Read the report
 (or the optional sidecar) to follow progress; do not wait for a `.DONE` that will not come.
+
+An authored `受阻：` first line with `reply --status done --keep-report` is a terminal blocked closure:
+preserve that line and write a `done` footer/marker. Consumers must accept it as terminal delivery, **not**
+as business success or a request to wait for more work. `done` with `就绪：` remains business success.
+Other first-line/status mismatches (e.g. `失败：` with `done`, `受阻：` with `failed`) are refused without
+changing the file or committing the new terminal status. `reply --status blocked --keep-report` is still
+non-terminal: no footer or `.DONE`.
 
 ## 4. The marker: `<report>.DONE` (`wake-report-done/1`)
 
@@ -219,7 +238,11 @@ the inbox, `ack`, `reply`; a reply writes the report and, for a terminal status,
 
 ## 8. Consuming and recording (engine side)
 
-A terminal report counts as consumed successfully only if all hold:
+A terminal report can be signed for only if the existing format, task, terminal-status and byte checks hold.
+For `done`, accept either `就绪：` (business success) or `受阻：` (final delivery, not business success).
+Keep your consumption record in both cases; never wait for continuation of a signed-for blocked closure.
+
+A report counts as business success only if all hold:
 
 1. `.DONE.format == "wake-report-done/1"`
 2. `.DONE.task_id` equals the envelope `id` you sent

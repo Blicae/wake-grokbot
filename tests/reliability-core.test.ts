@@ -131,7 +131,7 @@ describe("reply crash windows (file sink)", () => {
     expect(r.replies.map((x: { revision: number }) => x.revision).sort()).toEqual([1, 2]);
   });
 
-  it("sink not_sent (no report_roots) keeps status done, reports FAILED (exit 5); after fixing config watch delivers", async () => {
+  it("sink not_sent (no report_roots) keeps status queued, reports FAILED (exit 5); after fixing config watch delivers", async () => {
     const s = sandbox();
     const root = path.join(s.dir, "reports");
     fs.mkdirSync(root);
@@ -140,7 +140,7 @@ describe("reply crash windows (file sink)", () => {
     await s.run(["send", "--json", "-"], JSON.stringify(e));
     const r = await s.run(["reply", e.id, "--status", "done", "--summary", "x"]);
     expect(r.code).toBe(5);
-    expect(receipt(s, e.id).status).toBe("done");
+    expect(receipt(s, e.id).status).toBe("queued");
     expect(receipt(s, e.id).replies[0].delivery.state).toBe("not_sent");
     const st = await s.run(["status", e.id]);
     expect(st.out).toMatch(/report=not_sent/);
@@ -149,6 +149,9 @@ describe("reply crash windows (file sink)", () => {
     await s.run(["watch", "--once"]);
     expect(receipt(s, e.id).replies[0].delivery.state).toBe("delivered");
     expect(fs.existsSync(report + ".DONE")).toBe(true);
+    expect(receipt(s, e.id).status).toBe("done");
+    await s.run(["watch", "--once"]);
+    expect(receipt(s, e.id).status).toBe("done");
   });
 });
 
@@ -171,7 +174,7 @@ describe("webhook: unknown outcomes are never resent automatically", () => {
       expect(srv.hits).toHaveLength(before);
       const rec = receipt(s, e.id).replies[0];
       expect(rec.delivery.state).toBe("unknown");
-      expect(receipt(s, e.id).status).toBe("done");
+      expect(receipt(s, e.id).status).toBe("queued");
       const no = await s.run(["redeliver", rec.id]);
       expect(no.code).toBe(1);
       expect(srv.hits).toHaveLength(before);
@@ -324,7 +327,7 @@ describe("sink contract: outcome is required", () => {
     expect(receipt(s, e.id).replies[0].delivery.state).toBe("unknown");
   });
 
-  it("status keeps report=… separate from business done", async () => {
+  it("status keeps report=… separate from pending business status", async () => {
     const s = sandbox();
     const e = fileSinkTask();
     await s.run(["send", "--json", "-"], JSON.stringify(e));
@@ -334,7 +337,7 @@ describe("sink contract: outcome is required", () => {
     await eng.reply(e.id, { status: "done", summary: "ok" });
     const st = await s.run(["status", e.id]);
     expect(st.code).toBe(0);
-    expect(st.out).toMatch(/status=done/);
+    expect(st.out).toMatch(/status=queued/);
     expect(st.out).toMatch(/report=not_sent\/conflict/);
     expect(st.out).not.toMatch(/report=delivered/);
   });

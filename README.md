@@ -32,7 +32,12 @@ Answer it (worker):
 ```sh
 npx --yes wake-grokbot@0.1.1 ack <id>
 npx --yes wake-grokbot@0.1.1 reply <id> --status done --summary "Rewritten and checked" --body-file result.md
+# Or adopt an already-authored report at the task's agreed path (no --body-file / JSON body):
+npx --yes wake-grokbot@0.1.1 reply <id> --status done --keep-report --summary "Report ready"
 ```
+
+An authored `受阻：` report with `done --keep-report` is terminal delivery, not business success;
+`blocked --keep-report` remains non-terminal. See [consumer rules](docs/engine-consumer.md#3-the-report-wake-report1).
 
 ## Commands
 

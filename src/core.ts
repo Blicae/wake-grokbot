@@ -392,9 +392,10 @@ export class Engine {
   }
 
   /** Answer a task: write the reply envelope, update the task's receipt, deliver to its sink, wake the other side. */
-  async reply(id: string, input: Partial<Envelope> & { status: Status; quota?: Quota }): Promise<Result & { replyId: string }> {
+  async reply(id: string, input: Partial<Envelope> & { status: Status; quota?: Quota }, o: { keepReport?: boolean } = {}): Promise<Result & { replyId: string }> {
     const orig = this.store.readEnvelope(id);
     if (!orig) throw rule(`no such id: ${id}`);
+    if (o.keepReport && input.body !== undefined) throw rule("keep-report and body are mutually exclusive");
     const { quota, ...rest } = input;
     input = rest as typeof input;
     const qp = quotaProblems(quota);
@@ -433,6 +434,10 @@ export class Engine {
         if (oldHash !== hash) throw new CliError(`id ${reply.id} already exists`, EXIT.CONFLICT);
         // same reply sent again: finish an interrupted one, never write it twice
         if (!pending) throw new CliError(`id ${reply.id} already exists`, EXIT.RULE);
+        if (o.keepReport) {
+          pending.keepReport = true;
+          this.store.writeIntent(pending);
+        }
         return pending;
       }
       const task = this.store.readReceipt(id);
@@ -455,6 +460,7 @@ export class Engine {
         ...(orig.reply_to?.sink === "hufu-report" && isTerminal(reply.status)
           ? { report_footer: renderFooter({ quota, startedAt: startedAt(task ?? undefined), completedAt: Date.parse(reply.sent_at) }) }
           : {}),
+        ...(o.keepReport ? { keepReport: true } : {}),
         created_at: new Date(this.now()).toISOString(),
       };
       this.store.writeIntent(i);
@@ -512,7 +518,7 @@ export class Engine {
     this.fault("reply:after-enqueue");
     const r = this.store.readReceipt(i.taskId);
     if (r && !r.replies.some((x) => x.id === reply.id)) {
-      if (i.revision > (r.status_revision ?? 0) && !(isTerminal(r.status as Status) && !isTerminal(reply.status))) {
+      if (!i.reply_to && i.revision > (r.status_revision ?? 0) && !(isTerminal(r.status as Status) && !isTerminal(reply.status))) {
         r.status = reply.status!;
         r.next = reply.next;
         r.status_revision = i.revision;
@@ -560,6 +566,7 @@ export class Engine {
       timeoutMs: this.cfg.wake.timeout_seconds * 1000,
       delivery: { taskId: i.taskId, replyHash: i.hash, revision: i.revision },
       ...(i.report_footer ? { reportFooter: i.report_footer } : {}),
+      ...(i.keepReport ? { keepReport: true } : {}),
     };
     const hooks = coreTestHooks(this);
     hooks?.onDeliver?.(ctx);
@@ -574,6 +581,12 @@ export class Engine {
       const outcome = outcomeOf(res);
       const d = rec.delivery;
       delete d.attempt_started_at;
+      // Business status is earned by delivery, not by queuing its reply.
+      if (outcome === "delivered" && i.revision > (r.status_revision ?? 0) && !(isTerminal(r.status as Status) && !isTerminal(i.reply.status))) {
+        r.status = i.reply.status!;
+        r.next = i.reply.next;
+        r.status_revision = i.revision;
+      }
       d.state = outcome === "not_sent" && res.state !== "superseded" && d.attempts >= this.cfg.wake.max_attempts ? "failed" : outcome;
       d.at = new Date(this.now()).toISOString();
       d.detail = missing ? (res.detail ? `${res.detail}; ${OUTCOME_MISSING_DETAIL}` : OUTCOME_MISSING_DETAIL) : res.detail;
@@ -686,7 +699,7 @@ export class Engine {
   }
 
   /** Manual redelivery of one reply. An unknown outcome of a sink with outside side effects needs `acceptRisk`. */
-  async redeliver(replyId: string, o: { acceptRisk?: boolean; afterContractFix?: boolean } = {}): Promise<Result> {
+  async redeliver(replyId: string, o: { acceptRisk?: boolean; afterContractFix?: boolean; keepReport?: boolean } = {}): Promise<Result> {
     const i = this.store.readIntent(replyId);
     if (!i?.reply_to) {
       const d = this.store.lock(() => this.findDelivery(replyId));
@@ -711,6 +724,10 @@ export class Engine {
         throw rule(
           `${replyId}: the last ${i.reply_to!.sink} delivery may already have arrived; sending again can duplicate it. Re-run with --accept-duplicate-risk to send anyway`,
         );
+      if (o.keepReport) {
+        i.keepReport = true;
+        this.store.writeIntent(i);
+      }
       delete d.attempt_started_at;
       d.state = "pending";
       this.store.writeReceipt(r);

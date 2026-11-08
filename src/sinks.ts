@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { run } from "./channels/script.js";
 import type { Config } from "./config.js";
-import { type Envelope, isTerminal, REPORT_WORDS, type ReplyTo } from "./envelope.js";
+import { type Envelope, isTerminal, REPORT_WORDS, REPORT_WORD_EXCEPTIONS, type ReplyTo } from "./envelope.js";
 import { atomicWrite, isInside, tryLock } from "./fsutil.js";
 import { postJson, resolveUrl } from "./net.js";
 import { mask, registerSecret } from "./secrets.js";
@@ -38,6 +38,8 @@ export interface SinkContext {
   delivery?: SinkDelivery;
   /** report sinks only: fixed footer appended to a terminal report (never sent to webhooks or commands) */
   reportFooter?: string;
+  /** Explicit operator consent to adopt an existing hufu-report. */
+  keepReport?: boolean;
 }
 
 export const STATE_FORMAT = "wake-sink-state/1";
@@ -76,6 +78,20 @@ export function renderReport(reply: Envelope, footer?: string): string {
   lines.push("", (reply.body ?? "").replace(/\r\n/g, "\n").trimEnd(), "");
   if (footer && isTerminal(reply.status)) lines.push(footer, "");
   return lines.join("\n");
+}
+
+/** Preserve authored text; only supply a missing protocol header/footer. Called under the target lock. */
+function adoptReport(reply: Envelope, text: string, ctx: SinkContext): string {
+  const word = REPORT_WORDS[reply.status ?? "working"];
+  const first = text.split(/\r?\n/, 1)[0] ?? "";
+  const present = Object.values(REPORT_WORDS).find((w) => first.startsWith(`${w}：`));
+  const allowed = REPORT_WORD_EXCEPTIONS.some((x) => x.word === present && x.status === reply.status && x.keepReport === ctx.keepReport);
+  if (present && present !== word && !allowed) throw new Error("report first-line status does not match reply status");
+  if (!present) text = `${word}：${(reply.summary ?? reply.title ?? "").replace(/\s+/g, " ").trim()}\n\n${text}`;
+  if (isTerminal(reply.status) && ctx.reportFooter && !/(?:^|\r?\n)---\r?\n账号用量[^\r\n]*(?:\r?\n[^\r\n]*)*$/.test(text)) {
+    text += `${text.endsWith("\n") ? "\n" : "\n\n"}${ctx.reportFooter}\n`;
+  }
+  return text;
 }
 
 export async function deliver(reply: Envelope, to: ReplyTo, ctx: SinkContext): Promise<SinkResult> {
@@ -143,13 +159,17 @@ function writeTarget(reply: Envelope, t: Target, ctx: SinkContext): SinkResult {
     const terminal = isTerminal(reply.status);
     const st = parseMaybe(readMaybe(stateFile));
     const existing = readMaybe(t.file);
-    const bytes = Buffer.from(t.content, "utf8");
+    if (ctx.keepReport && t.marker && !existing) return notSent(`${t.label}: keep-report requires an existing report`, "conflict");
+    const bytes = Buffer.from(ctx.keepReport && t.marker ? adoptReport(reply, existing!.toString("utf8"), ctx) : t.content, "utf8");
     const fileHash = sha256(bytes);
     const assoc = d ? { task_id: d.taskId, revision: d.revision, reply_hash: d.replyHash } : {};
     if (!d) {
       if (st || fs.existsSync(stateFile)) return notSent(`${t.label}: target is owned by a task delivery; legacy call refused`);
     } else {
-      if (!st && (existing || fs.existsSync(done) || fs.existsSync(stateFile))) return notSent(`${t.label}: target exists and is not owned by this delivery`, "conflict");
+      const claim = ctx.keepReport && t.marker && existing && !fs.existsSync(stateFile);
+      const marker = parseMaybe(readMaybe(done));
+      if (claim && marker?.task_id && marker.task_id !== d.taskId) return notSent(`${t.label}: marker belongs to another task`, "conflict");
+      if (!st && !claim && (existing || fs.existsSync(done) || fs.existsSync(stateFile))) return notSent(`${t.label}: target exists and is not owned by this delivery`, "conflict");
       if (st && st.format !== STATE_FORMAT) return notSent(`${t.label}: unknown state format`, "conflict");
       if (st) {
         if (st.task_id !== d.taskId) return notSent(`${t.label}: target belongs to another task`, "conflict");
@@ -241,5 +261,5 @@ function hufuReport(reply: Envelope, to: ReplyTo, ctx: SinkContext): SinkResult 
   if (!to.report_path || !path.isAbsolute(to.report_path)) return notSent("hufu-report sink: report_path must be absolute");
   if (/(^|[\\/])\.\.([\\/]|$)/.test(to.report_path)) return notSent("hufu-report sink: report_path must not contain ..");
   if (!roots.some((r) => isInside(r, target) && path.resolve(r) !== target)) return notSent("hufu-report sink: report_path is outside the allowed report roots");
-  return writeTarget(reply, { file: target, content: renderReport(reply, ctx.reportFooter), marker: true, label: `hufu-report ${path.basename(target)}` }, ctx);
+  return writeTarget(reply, { file: target, content: ctx.keepReport ? "" : renderReport(reply, ctx.reportFooter), marker: true, label: `hufu-report ${path.basename(target)}` }, ctx);
 }

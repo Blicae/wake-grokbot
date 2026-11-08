@@ -47,6 +47,8 @@ export interface ReplyIntent {
   reply_to?: ReplyTo;
   /** terminal report footer (quota + execution time), fixed when the intent is written so every redelivery writes the same bytes */
   report_footer?: string;
+  /** Explicitly adopt existing report bytes, never part of the reply envelope/hash. */
+  keepReport?: boolean;
   created_at: string;
 }
 

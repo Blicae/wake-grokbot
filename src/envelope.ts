@@ -165,6 +165,9 @@ export const REPORT_WORDS: Record<Status, string> = {
   declined: "无需处理",
 };
 
+/** Only explicit report adoption permits a different first-line word from the envelope status. */
+export const REPORT_WORD_EXCEPTIONS = [{ word: REPORT_WORDS.blocked, status: "done", keepReport: true }] as const;
+
 /** True when the envelope carries `expires_at` and that time has passed. */
 export function isExpired(e: Pick<Envelope, "expires_at"> | null | undefined, now = Date.now()): boolean {
   if (!e?.expires_at) return false;
