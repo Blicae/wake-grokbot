@@ -144,6 +144,10 @@ for `.DONE` on `needs_input`/`blocked` must poll the report (or `<report>.wake.j
 `status: "done"` and first line `就绪：`; `done` with `受阻：` is terminal delivery, not success;
 `failed` and `declined` are final but not success. Verify `report_sha256` against the report.
 
+Report file layout below describes `hufu-report` (legacy name, retained for compatibility / 旧名，兼容保留).
+For `report-file`, configurable locale/timezone, optional quota and the English status table, see
+[Report language and time](protocol.md#report-language-and-time). Lock, path and marker guarantees are shared.
+
 Report file layout:
 
 ```
@@ -174,7 +178,10 @@ Grok Bot额度（周额度，非本单消耗）：已用 62%，剩余 38%，重�
   `reply --quota-used/--quota-remaining/--quota-reset` (or `"quota": {used, remaining, reset}` in `reply --json`).
   Missing values read `未提供`; the reply never fails for that. A reset time in zoned ISO-8601 or epoch
   seconds/milliseconds is shown in 北京时间; anything else is shown as given with `（原样，未换算）`. Values
-  containing a URL or something secret-like are refused (exit 1, nothing written).
+  must not include URLs or credentials. Validation rejects non-strings, values over 200 characters, URLs with a
+  scheme (`…://`), `Authorization:` headers, bearer tokens (at least 8 token characters), key prefixes
+  `sk-`, `ghp_`, `xox[abprs]-`, `glpat-` (at least 8 following key characters), and private-key headers
+  (exit 1, nothing written). This is not exhaustive: `www.example.invalid/usage` and `api_key=…` are not detected.
 - 任务执行: computed by the CLI. Start = the earliest `ack` or non-terminal (`working` / `needs_input`) reply in
   the task receipt, never the ingest/queue time; finish = the terminal reply's `sent_at`. Without an ack the
   line reads `任务执行：开始时间：未记录领单（ack）时间，完成 北京时间 …，耗时 无法计算`. Duration is Chinese with
