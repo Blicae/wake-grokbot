@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.1.2
+
+- `reply --keep-report` (and the same flag on `redeliver`) adopts an existing report file at the legal path
+  instead of rewriting the body into the envelope. It is off by default and mutually exclusive with `--body-file`
+  and a JSON `body`.
+- When a reply has a sink, the task receipt is not marked terminal until the write succeeds. A conflict (the
+  target exists and is not owned by this delivery) exits 5 and leaves the previous business status unchanged.
+- A report whose first line is `受阻：` can be delivered with `reply --status done --keep-report`: the header is
+  kept, and the footer and `.DONE` use status `done`. Consumers must treat this as terminal delivery, not
+  business success. `reply --status blocked` remains non-terminal.
+- The terminal footer label is now `Grok Bot额度（周额度，非本单消耗）`. Existing footers that start with
+  `账号用量` are still recognized and not appended again. Woken Bots should pass only used / remaining / reset
+  values, not another product name such as Cursor.
+
 ## 0.1.1
 
 - Terminal report footer: a `done` / `failed` / `declined` report file (`hufu-report` sink) now ends with a fixed

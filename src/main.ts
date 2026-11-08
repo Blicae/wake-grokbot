@@ -15,7 +15,7 @@ import { configPath, ENV, PROG } from "./paths.js";
 import { mask, normalizeKey, readStream, registerSecret } from "./secrets.js";
 import { type EnvSource, resolveEnv } from "./winenv.js";
 
-export const VERSION_STRING = "0.1.1";
+export const VERSION_STRING = "0.1.2";
 
 export interface Io {
   stdin: NodeJS.ReadableStream;
