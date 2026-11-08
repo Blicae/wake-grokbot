@@ -134,7 +134,7 @@ export function validateConfig(cfg: Config): string[] {
     if (!["en", "zh-CN"].includes(cfg.report.locale)) p.push("report.locale must be en or zh-CN");
     if (typeof cfg.report.quota_line !== "boolean") p.push("report.quota_line must be a boolean");
     try {
-      if (typeof cfg.report.timezone !== "string" || !cfg.report.timezone.trim()) throw new Error();
+      if (typeof cfg.report.timezone !== "string" || !cfg.report.timezone.trim() || /^[+-]/.test(cfg.report.timezone)) throw new Error();
       new Intl.DateTimeFormat("en", { timeZone: cfg.report.timezone }).format(0);
     } catch { p.push("report.timezone must be an IANA timezone"); }
   }

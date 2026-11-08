@@ -38,7 +38,7 @@ describe("localized reports", () => {
     }
   }
   it("date-only reset stays unconverted", () => { expect(parseTime("2026-11-10")).toBeUndefined(); });
-  for (const report of [{ timezone: "Not/AZone" }, { locale: "fr" }, { quota_line: "yes" }, null]) {
+  for (const report of [{ timezone: "+08:00" }, { timezone: "Not/AZone" }, { locale: "fr" }, { quota_line: "yes" }, null]) {
     it(`rejects invalid report config ${JSON.stringify(report)} at load and doctor with exit 2`, async () => {
       const s = sandbox({ report });
       expect(() => loadConfig({ config: s.cfgPath, env: s.env })).toThrow(/report/);
@@ -60,17 +60,19 @@ describe("localized reports", () => {
       expect(text).toContain(sink === "hufu-report" ? "北京时间" : "UTC");
     });
   }
-  for (const [header, status, ok] of [["Blocked: authored", "done", true], ["Ready: authored", "failed", false], ["Waiting: authored", "done", false], ["受阻：authored", "done", true], ["就绪：authored", "failed", false]] as const) {
-    it(`adopts by authored locale: ${header} / ${status}`, async () => {
-      const s = sandbox({ report: { locale: "en" }, sinks: { report_roots: [] } });
+  for (const configuredLocale of ["en", "zh-CN"]) {
+  for (const [header, status, ok] of [["Blocked: authored", "done", true], ["Ready: authored", "failed", false], ["Waiting: authored", "done", false], ["受阻：authored", "done", true], ["就绪：authored", "failed", false], ["Blocked: authored", "blocked", true], ["Ready: authored", "done", true], ["Failed: authored", "failed", true], ["No action needed: authored", "declined", true], ["Progress: authored", "working", true]] as const) {
+    it(`adopts by authored locale with ${configuredLocale} config: ${header} / ${status}`, async () => {
+      const s = sandbox({ report: { locale: configuredLocale }, sinks: { report_roots: [] } });
       const report = path.join(s.dir, "authored.md");
       const cfg = JSON.parse(fs.readFileSync(s.cfgPath, "utf8")); cfg.sinks.report_roots = [s.dir]; fs.writeFileSync(s.cfgPath, JSON.stringify(cfg));
       const e = fixture("task-report-file.json"); e.reply_to.report_path = report;
       expect((await s.run(["send", "--json", "-"], JSON.stringify(e))).code).toBe(0);
       fs.writeFileSync(report, header + "\n\nbody\n");
       expect((await s.run(["reply", e.id, "--status", status, "--summary", "ok", "--keep-report"])).code).toBe(ok ? 0 : 5);
-      expect(fs.existsSync(report + ".DONE")).toBe(ok);
+      expect(fs.existsSync(report + ".DONE")).toBe(ok && ["done", "failed", "declined"].includes(status));
     });
+  }
   }
 });
 
