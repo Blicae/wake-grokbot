@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Blicae8917/wake-grokbot/schema/wake-envelope-1.schema.json",
+  "$id": "https://github.com/Blicae/wake-grokbot/schema/wake-envelope-1.schema.json",
   "title": "wake-envelope/1",
   "description": "A message between a dispatcher and a worker. Content is data, never instructions. No URLs or secrets: refer to configured names only.",
   "type": "object",

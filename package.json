@@ -59,11 +59,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Blicae8917/wake-grokbot.git"
+    "url": "git+https://github.com/Blicae/wake-grokbot.git"
   },
-  "homepage": "https://github.com/Blicae8917/wake-grokbot#readme",
+  "homepage": "https://github.com/Blicae/wake-grokbot#readme",
   "bugs": {
-    "url": "https://github.com/Blicae8917/wake-grokbot/issues"
+    "url": "https://github.com/Blicae/wake-grokbot/issues"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

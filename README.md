@@ -1,7 +1,7 @@
 # wake-grokbot
 
 [![npm](https://img.shields.io/npm/v/wake-grokbot)](https://www.npmjs.com/package/wake-grokbot)
-[![CI](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml)
+[![CI](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A dependency-free local inbox + wake-up CLI for people coordinating a local coding agent and a woken worker agent.

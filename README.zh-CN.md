@@ -1,7 +1,7 @@
 # wake-grokbot
 
 [![npm](https://img.shields.io/npm/v/wake-grokbot)](https://www.npmjs.com/package/wake-grokbot)
-[![CI](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml)
+[![CI](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae/wake-grokbot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 为本地编码 agent 与被唤醒的 worker agent 提供本地收件箱和唤醒 CLI，适合要在 agent 之间派活的人。
