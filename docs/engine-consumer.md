@@ -50,7 +50,7 @@ Windows example envelope (all values are illustrations):
   "authorization": "inferred",
   "reply_to": {
     "sink": "hufu-report",
-    "report_path": "D:\\Code\\8917\\open-source\\example-reports\\<task-uuid>.md"
+    "report_path": "C:\\reports\\<task-uuid>.md"
   },
   "task": { "ref": { "ticket_id": "B-7", "card_path": "cards/B-7.md" } },
   "sent_at": "2026-11-05T05:00:00Z"
@@ -84,11 +84,11 @@ Rules:
 Example layout (illustration, not a production path):
 
 ```
-report_roots:  D:\Code\8917\open-source\example-reports
-report:        D:\Code\8917\open-source\example-reports\<task-uuid>.md
-marker:        D:\Code\8917\open-source\example-reports\<task-uuid>.md.DONE
-sidecar:       D:\Code\8917\open-source\example-reports\<task-uuid>.md.wake.json   (optional to read)
-lock:          D:\Code\8917\open-source\example-reports\<task-uuid>.md.lock        (do not touch)
+report_roots:  C:\reports
+report:        C:\reports\<task-uuid>.md
+marker:        C:\reports\<task-uuid>.md.DONE
+sidecar:       C:\reports\<task-uuid>.md.wake.json   (optional to read)
+lock:          C:\reports\<task-uuid>.md.lock        (do not touch)
 ```
 
 On Unix the same shape applies, e.g. `/srv/reports/<task-uuid>.md` as in the public fixture.
@@ -271,3 +271,4 @@ for diagnosis; they are not a consumption record.
 - rely on private formats of any engine or channel inside wake-grokbot.
 
 See also: [engine-interface.md](engine-interface.md), [protocol.md](protocol.md), [threat-model.md](threat-model.md).
+Report root examples: `C:\reports` on Windows; `/srv/reports` on Linux/macOS. Use an absolute path available to the consumer.

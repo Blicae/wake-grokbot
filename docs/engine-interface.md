@@ -24,7 +24,7 @@ engine ◀── <report>.md + <report>.md.DONE ◀────────┘ (
 
 `report_roots` lists the only folders reports may be written to. The wake URL and key come from environment
 variables (see `wake-grokbot doctor`), never from the config or the envelope. On Windows, use drive-letter
-absolute paths (in JSON, backslashes are escaped), for example `"report_roots": ["D:\\Code\\8917\\open-source\\example-reports"]`;
+absolute paths (in JSON, backslashes are escaped), for example `"report_roots": ["C:\\reports"]`;
 this and every other path in this page is an illustration, not a production location. Relative `report_roots`
 and `sign.key_file` values are resolved against the folder of the config file.
 
@@ -75,7 +75,7 @@ Rules the engine must follow:
 - No URLs and no secrets anywhere in the envelope (exit 1). Refer to configured names instead.
 - `report_path` is absolute, has no `..`, lies inside a `report_roots` folder (not the root itself), and is unique
   per task. The fixture's `/srv/reports/build-summary.md` is a Unix example; on Windows use a drive-letter path such as
-  `D:\Code\8917\open-source\example-reports\<task-uuid>.md` (JSON: `"D:\\Code\\8917\\open-source\\example-reports\\<task-uuid>.md"`).
+  `C:\reports\<task-uuid>.md` (JSON: `"C:\\reports\\<task-uuid>.md"`).
   A path outside the roots is refused when the reply is delivered (`reply` exits 5, nothing written), not at `ingest`.
 - Optional `expires_at` (RFC 3339 date-time, as `format: date-time` in the schema). `ingest` (and `send`) check the id first: an id it has already accepted follows the
   idempotency rules (same content → 0/5/6 from the recorded wake state, different → 7) with no expiry check, so
@@ -228,3 +228,5 @@ Procedure (before an upgrade, and whenever such a message appears):
 Windows: pid liveness uses the same check; equivalence of process termination on Windows is pending platform
 validation.
 
+
+Report root examples: `C:\reports` on Windows; `/srv/reports` on Linux/macOS. Use an absolute path available to the consumer.
