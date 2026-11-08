@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Add the neutral `report-file` sink; retain `hufu-report` as a legacy compatibility alias under `wake-envelope/1`.
+- Configure report language (`en` / `zh-CN`), IANA timezone and optional quota line. The legacy alias keeps its original defaults and report format.
+- Recognize authored status headers and existing footers in both languages; preserve the first explicit acknowledgement time and reject ambiguous reset dates.
+- Add bilingual onboarding with explicit local/cloud inbox boundaries and a credential-free two-terminal script demo.
+- Remove internal documents and personal example paths; clarify optional account-usage guidance and pin the publishing CLI bootstrap.
+- Refresh package discovery metadata, badges and version-pinned watch examples. No runtime dependencies added.
+
+
 ## Unreleased
 
 ## 0.1.2

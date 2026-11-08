@@ -15,7 +15,7 @@ import { configPath, ENV, PROG } from "./paths.js";
 import { mask, normalizeKey, readStream, registerSecret } from "./secrets.js";
 import { type EnvSource, resolveEnv } from "./winenv.js";
 
-export const VERSION_STRING = "0.1.2";
+export const VERSION_STRING = "0.2.0";
 
 export interface Io {
   stdin: NodeJS.ReadableStream;
@@ -44,7 +44,7 @@ Commands:
                               a top-level "quota": {used, remaining, reset} is read for the report footer
                               [--quota-used <t>] [--quota-remaining <t>] [--quota-reset <time>]
                               account weekly quota as the woken Bot sees it (not this task's cost); shown in
-                              the footer of a done/failed/declined report file, with start/finish in 北京时间
+                              the footer of a done/failed/declined report file, with start/finish in the configured timezone
   watch [--once] [--interval <seconds>]   deliver queued wakes (for a scheduled task)
   redeliver <reply-id> [--keep-report] [--accept-duplicate-risk] [--after-contract-fix]
                               send one reply to its sink again by hand (unknown outcomes need the risk flag;

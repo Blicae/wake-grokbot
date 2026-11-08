@@ -1,5 +1,25 @@
 # wake-grokbot
 
+[![npm](https://img.shields.io/npm/v/wake-grokbot)](https://www.npmjs.com/package/wake-grokbot)
+[![CI](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Blicae8917/wake-grokbot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+A dependency-free local inbox + wake-up CLI for people coordinating a local coding agent and a woken worker agent.
+Idempotent receipts, rate limits and leak guards; Grok Bot routines first, `script` for other systems.
+Try it now without accounts or keys: [five-minute guide](docs/getting-started.md) / [two-terminal demo](examples/local-demo/README.md).
+Node.js 22+, Windows/macOS/Linux. Your computer is not the Bot cloud computer; inbox access must be configured.
+
+```mermaid
+flowchart LR
+  D[Dispatcher agent] --> C[CLI + inbox]
+  C --> W[Wake: routine or script]
+  W --> A[Worker agent]
+  A --> R[ack + reply]
+  R --> C
+  C --> F[Report + receipt]
+  F --> D
+```
+
 [Getting started / 五分钟上手](docs/getting-started.md) · [Local demo](examples/local-demo/README.md)
 
 [中文说明](README.zh-CN.md)
@@ -15,27 +35,27 @@ through a local inbox, and **wakes** the other side (for example a Grok Bot rout
 ## Quick start
 
 ```sh
-npx --yes wake-grokbot@0.1.2 init        # example config + inbox folders
+npx --yes wake-grokbot@0.2.0 init        # example config + inbox folders
 # put the routine's webhook URL and key in environment variables:
 #   WAKE_GROKBOT_URL, WAKE_GROKBOT_KEY   (never in the config, never on the command line)
-npx --yes wake-grokbot@0.1.2 doctor      # checks everything, prints no secrets
+npx --yes wake-grokbot@0.2.0 doctor      # checks everything, prints no secrets
 ```
 
 Send a task (dispatcher):
 
 ```sh
-npx --yes wake-grokbot@0.1.2 send --to worker --title "Tidy the README" --objective "Rewrite the install section"
+npx --yes wake-grokbot@0.2.0 send --to worker --title "Tidy the README" --objective "Rewrite the install section"
 # or a full envelope:
-npx --yes wake-grokbot@0.1.2 send --json < task.json
+npx --yes wake-grokbot@0.2.0 send --json < task.json
 ```
 
 Answer it (worker):
 
 ```sh
-npx --yes wake-grokbot@0.1.2 ack <id>
-npx --yes wake-grokbot@0.1.2 reply <id> --status done --summary "Rewritten and checked" --body-file result.md
+npx --yes wake-grokbot@0.2.0 ack <id>
+npx --yes wake-grokbot@0.2.0 reply <id> --status done --summary "Rewritten and checked" --body-file result.md
 # Or adopt an already-authored report at the task's agreed path (no --body-file / JSON body):
-npx --yes wake-grokbot@0.1.2 reply <id> --status done --keep-report --summary "Report ready"
+npx --yes wake-grokbot@0.2.0 reply <id> --status done --keep-report --summary "Report ready"
 ```
 
 An authored `受阻：` report with `done --keep-report` is terminal delivery, not business success;
@@ -86,7 +106,8 @@ one came from (process/user/machine/missing), never the value.
 - Channels: `grokbot` (HTTPS POST with a Bearer key, summary-only payload) and `script` (runs a command).
   See [docs/channels.md](docs/channels.md).
 - Reply sinks, chosen per task in `reply_to`: `file`, `webhook` (HMAC-SHA256 signed), `command`, and
-  `hufu-report` (a Hufu-style report file plus a `.DONE` marker). See [docs/integrations.md](docs/integrations.md).
+  `report-file` (localized report plus `.DONE`; defaults: en / UTC / optional quota).
+  `hufu-report` is the legacy name, retained for compatibility（旧名，兼容保留）, fixed to zh-CN / Asia/Shanghai / quota line. See [docs/integrations.md](docs/integrations.md).
 
 ## Agents
 
