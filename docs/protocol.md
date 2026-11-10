@@ -115,15 +115,18 @@ Wake states: `none` (no target configured), `queued`, `coalesced` (rides on the 
 
 ## Mapping to A2A task states
 
+Per A2A v1.0.1. Outbound calls always return immediately (A2A `returnImmediately`); results are retrieved via the receipt or by querying the task.
+
 | wake-envelope/1 | A2A task state |
 |---|---|
-| task accepted, not yet acked | `submitted` |
-| `working` | `working` |
-| `needs_input` | `input-required` |
-| `done` | `completed` |
-| `failed` | `failed` |
-| `blocked` | `failed` (with the reason) or `input-required` when a person can unblock it |
-| `declined` | `rejected` |
+| task accepted, not yet acked | `TASK_STATE_SUBMITTED` |
+| `working` | `TASK_STATE_WORKING` |
+| `needs_input` | `TASK_STATE_INPUT_REQUIRED` |
+| `done` | `TASK_STATE_COMPLETED` |
+| `failed` | `TASK_STATE_FAILED` |
+| `blocked` | `TASK_STATE_FAILED` (with the reason), or `TASK_STATE_INPUT_REQUIRED` when a person can unblock it, or `TASK_STATE_AUTH_REQUIRED` when authorization is missing |
+| `declined` | `TASK_STATE_REJECTED` |
+| `done --keep-report` with a report headed `Blocked:` / `受阻：` (terminal, not success) | `TASK_STATE_FAILED`, with the report attached as an Artifact |
 
 `report-file` writes a report and terminal `.DONE` marker under an allowed report root. `hufu-report` is the legacy name, retained for compatibility（旧名，兼容保留）. Both require `reply_to.report_path`; envelope version remains `wake-envelope/1`.
 
